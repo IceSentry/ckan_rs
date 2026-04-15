@@ -1,4 +1,6 @@
 use bevy::{
+    color::palettes::css::{BLUE, LIME, RED},
+    ecs::schedule::SingleThreadedExecutor,
     feathers::{
         FeathersPlugins,
         controls::{ButtonProps, button},
@@ -6,29 +8,66 @@ use bevy::{
         theme::{ThemeBackgroundColor, ThemedText, UiTheme},
         tokens,
     },
+    platform::collections::HashMap,
     prelude::*,
+    render::Render,
+    tasks::{AsyncComputeTaskPool, Task, futures::check_ready},
     ui_widgets::Activate,
-    winit::WinitSettings,
+    winit::{EventLoopProxyWrapper, WinitSettings, WinitUserEvent},
 };
+use rand::{RngExt, SeedableRng, rngs::SmallRng};
+use serde::Deserialize;
+use xshell::Shell;
 
-#[derive(Resource)]
-struct Counter(i32);
+// ["identifier", "version", "name", "abstract", "description", "author", "kind",
+// "download", "download_size", "ksp_version", "ksp_version_min", "ksp_version_max", "license",
+// "release_status", "repository", "homepage", "bugtracker", "discussions", "spacedock", "curse"]
+#[derive(Debug, serde::Deserialize)]
+struct Record {
+    identifier: String,
+    version: String,
+    name: String,
+    r#abstract: String,
+    description: Option<String>,
+    author: String,
+    kind: String,
+    release_status: String,
+}
 
-#[derive(Component, Default, Clone)]
-struct CounterText;
-
-fn main() {
-    App::new()
-        .add_plugins((DefaultPlugins, FeathersPlugins))
+fn main() -> anyhow::Result<()> {
+    let mut app = App::new();
+    app.add_plugins((DefaultPlugins, FeathersPlugins))
         .insert_resource(UiTheme(create_dark_theme()))
         .insert_resource(WinitSettings::desktop_app())
-        .insert_resource(Counter(0))
-        .add_systems(Startup, setup)
+        .add_systems(Startup, (setup, startup_tasks))
         .add_systems(
             Update,
-            update_counter_text.run_if(resource_changed::<Counter>),
-        )
-        .run();
+            (handle_tasks.run_if(any_with_component::<GetList>),),
+        );
+
+    // Set all schedules to single threaded to reduce cpu usage
+    app.edit_schedule(First, |s| {
+        s.set_executor(SingleThreadedExecutor::new());
+    });
+    app.edit_schedule(PreUpdate, |s| {
+        s.set_executor(SingleThreadedExecutor::new());
+    });
+    app.edit_schedule(Update, |s| {
+        s.set_executor(SingleThreadedExecutor::new());
+    });
+    app.edit_schedule(PostUpdate, |s| {
+        s.set_executor(SingleThreadedExecutor::new());
+    });
+    app.edit_schedule(Last, |s| {
+        s.set_executor(SingleThreadedExecutor::new());
+    });
+    app.edit_schedule(Render, |s| {
+        s.set_executor(SingleThreadedExecutor::new());
+    });
+
+    app.run();
+
+    Ok(())
 }
 
 fn setup(world: &mut World) -> Result {
@@ -36,50 +75,202 @@ fn setup(world: &mut World) -> Result {
     Ok(())
 }
 
+#[derive(Component)]
+struct GetList(Task<Vec<ListEntry>>);
+
+#[derive(Debug)]
+struct ListEntry {
+    status: ListEntryStatus,
+    id: String,
+    version: String,
+}
+
+#[derive(Debug)]
+enum ListEntryStatus {
+    UpToDate,
+    AutoInstalled,
+    Incompatible,
+    Upgradable,
+    Replaceable,
+    Autodetected,
+    Unknown,
+    Broken,
+}
+
+impl ListEntryStatus {
+    fn from_str(s: &str) -> Self {
+        let c = s.chars().next().expect("status char");
+        match c {
+            '-' => Self::UpToDate,
+            '+' => Self::AutoInstalled,
+            'X' => Self::Incompatible,
+            '^' => Self::Upgradable,
+            '>' => Self::Replaceable,
+            'A' => Self::Autodetected,
+            '?' => Self::Unknown,
+            '*' => Self::Broken,
+            _ => panic!("Unknown module status: {c}"),
+        }
+    }
+}
+
+fn startup_tasks(mut commands: Commands) {
+    let pool = AsyncComputeTaskPool::get();
+    let task = pool.spawn(async move {
+        let sh = Shell::new().expect("Failed to init shell");
+        let list = xshell::cmd!(sh, "./ckan.exe list --porcelain")
+            .read()
+            .expect("Failed to get list");
+
+        list.lines()
+            .map(|l| {
+                let mut line_iter = l.split_whitespace();
+                let status = line_iter.next().expect("status");
+                let id = line_iter.next().expect("id").trim();
+                let version = line_iter.next().expect("version").trim();
+                ListEntry {
+                    status: ListEntryStatus::from_str(status),
+                    id: id.to_string(),
+                    version: version.to_string(),
+                }
+            })
+            .collect::<Vec<_>>()
+        // let mut v = vec![];
+        // for _ in 0..29 {
+        //     v.push(ListEntry {
+        //         status: ListEntryStatus::AutoInstalled,
+        //         version: "(unmanaged)".to_string(),
+        //         id: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+        //     });
+        // }
+        // v
+    });
+    commands.spawn(GetList(task));
+}
+
+fn handle_tasks(
+    mut commands: Commands,
+    mut transform_tasks: Query<(Entity, &mut GetList)>,
+    ui_root: Single<Entity, With<UiRoot>>,
+    event_loop_proxy: Res<EventLoopProxyWrapper>,
+) {
+    info!("update");
+    // Keep the app awake until the task is complete
+    let _ = event_loop_proxy.send_event(WinitUserEvent::WakeUp);
+
+    for (entity, mut task) in &mut transform_tasks {
+        let Some(list) = check_ready(&mut task.0) else {
+            continue;
+        };
+        commands.entity(entity).remove::<GetList>();
+
+        let mut ui_root = commands.entity(*ui_root);
+        ui_root.despawn_children();
+        for module in list {
+            ui_root.with_child((
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Column,
+                    ..Default::default()
+                },
+                children![
+                    (
+                        Node {
+                            margin: UiRect::horizontal(px(10.0)),
+                            height: px(24),
+                            width: percent(100),
+                            flex_direction: FlexDirection::Row,
+                            ..Default::default()
+                        },
+                        children![
+                            (
+                                Node {
+                                    margin: UiRect::horizontal(px(5.0)),
+                                    width: Val::Px(165.0),
+                                    height: percent(100),
+                                    overflow: Overflow::clip(),
+                                    flex_direction: FlexDirection::Column,
+                                    ..Default::default()
+                                },
+                                children![(Text::new(format!("{:?}", module.status)), ThemedText)]
+                            ),
+                            (
+                                Node {
+                                    width: px(1),
+                                    height: percent(100),
+                                    ..Default::default()
+                                },
+                                ThemeBackgroundColor(tokens::MENU_BORDER)
+                            ),
+                            (
+                                Node {
+                                    margin: UiRect::horizontal(px(5.0)),
+                                    width: Val::Px(140.0),
+                                    height: percent(100),
+                                    overflow: Overflow::clip(),
+                                    ..Default::default()
+                                },
+                                children![(Text::new(format!("{}", module.version)), ThemedText)]
+                            ),
+                            (
+                                Node {
+                                    width: px(1),
+                                    height: percent(100),
+                                    ..Default::default()
+                                },
+                                ThemeBackgroundColor(tokens::MENU_BORDER)
+                            ),
+                            (
+                                Node {
+                                    margin: UiRect::horizontal(px(5)),
+                                    // width: Val::Auto,
+                                    // height: px(16),
+                                    overflow: Overflow::clip(),
+                                    ..Default::default()
+                                },
+                                children![(Text::new(format!("{}", module.id)), ThemedText,)]
+                            )
+                        ]
+                    ),
+                    (
+                        Node {
+                            height: px(1),
+                            width: percent(100),
+                            ..Default::default()
+                        },
+                        ThemeBackgroundColor(tokens::MENU_BORDER)
+                    )
+                ],
+            ));
+        }
+    }
+}
+
+#[derive(Component, Default, Clone, Copy)]
+struct UiRoot;
+
 fn demo_root() -> impl Scene {
     bsn! {
+        UiRoot
         Node {
             width: percent(100),
             height: percent(100),
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
+            align_items: AlignItems::FlexStart,
+            justify_content: JustifyContent::FlexStart,
+            flex_direction: FlexDirection::Column,
         }
         ThemeBackgroundColor(tokens::WINDOW_BG)
         Children[(
             Node {
+                width: percent(100),
+                height: percent(100),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
+                margin: UiRect::horizontal(px(10.0)),
             }
-            Children [
-                (
-                    button(ButtonProps::default())
-                    on(|_activate: On<Activate>, mut counter: ResMut<Counter>| {
-                        counter.0 -= 1;
-                    })
-                    Children [ (Text::new("-1") ThemedText) ]
-                ),
-                (
-                    Node {
-                        margin: UiRect::horizontal(px(10.0)),
-                    }
-                    Text::new("0") ThemedText CounterText
-                ),
-                (
-                    button(ButtonProps::default())
-                    on(|_activate: On<Activate>, mut counter: ResMut<Counter>| {
-                        counter.0 += 1;
-                    })
-                    Children [ (Text::new("+1") ThemedText) ]
-                )
-            ]
+            Children[(
+                Text::new("Loading...") ThemedText
+            )]
         )]
     }
-}
-
-fn update_counter_text(
-    counter: Res<Counter>,
-    mut counter_text: Single<&mut Text, With<CounterText>>,
-) {
-    info!("Counter updated");
-    counter_text.0 = format!("{}", counter.0);
 }

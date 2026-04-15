@@ -1797,6 +1797,7 @@ dependencies = [
  "bevy",
  "crossbeam-channel",
  "csv",
+ "indexmap",
  "rand",
  "serde",
  "serde_json",

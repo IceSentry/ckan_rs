@@ -19,6 +19,8 @@ use rand::{RngExt, SeedableRng, rngs::SmallRng};
 use serde::Deserialize;
 use xshell::Shell;
 
+mod ckan;
+
 // ["identifier", "version", "name", "abstract", "description", "author", "kind",
 // "download", "download_size", "ksp_version", "ksp_version_min", "ksp_version_max", "license",
 // "release_status", "repository", "homepage", "bugtracker", "discussions", "spacedock", "curse"]
@@ -76,7 +78,11 @@ fn setup(world: &mut World) -> Result {
 }
 
 #[derive(Component)]
-struct GetList(Task<Vec<ListEntry>>);
+struct GetList(Task<TaskResult>);
+
+struct TaskResult {
+    installed: Vec<ListEntry>,
+}
 
 #[derive(Debug)]
 struct ListEntry {
@@ -118,11 +124,21 @@ fn startup_tasks(mut commands: Commands) {
     let pool = AsyncComputeTaskPool::get();
     let task = pool.spawn(async move {
         let sh = Shell::new().expect("Failed to init shell");
+
+        xshell::cmd!(sh, "./ckan.exe scan")
+            .run()
+            .expect("Failed to update ckan");
+
+        xshell::cmd!(sh, "./ckan.exe update")
+            .run()
+            .expect("Failed to update ckan");
+
         let list = xshell::cmd!(sh, "./ckan.exe list --porcelain")
             .read()
             .expect("Failed to get list");
 
-        list.lines()
+        let installed = list
+            .lines()
             .map(|l| {
                 let mut line_iter = l.split_whitespace();
                 let status = line_iter.next().expect("status");
@@ -134,16 +150,24 @@ fn startup_tasks(mut commands: Commands) {
                     version: version.to_string(),
                 }
             })
-            .collect::<Vec<_>>()
-        // let mut v = vec![];
-        // for _ in 0..29 {
-        //     v.push(ListEntry {
+            .collect::<Vec<_>>();
+
+        let repo = ckan::get_repo().unwrap();
+        for (module_id, module) in repo.available_modules {
+            if let Some((version, _ckan_module)) = module.module_version.iter().last() {
+                println!("{module_id} ({version})");
+            }
+        }
+
+        // let mut installed = vec![];
+        // for _ in 0..20 {
+        //     installed.push(ListEntry {
         //         status: ListEntryStatus::AutoInstalled,
+        //         id: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
         //         version: "(unmanaged)".to_string(),
-        //         id: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
         //     });
         // }
-        // v
+        TaskResult { installed }
     });
     commands.spawn(GetList(task));
 }
@@ -154,19 +178,18 @@ fn handle_tasks(
     ui_root: Single<Entity, With<UiRoot>>,
     event_loop_proxy: Res<EventLoopProxyWrapper>,
 ) {
-    info!("update");
     // Keep the app awake until the task is complete
     let _ = event_loop_proxy.send_event(WinitUserEvent::WakeUp);
 
     for (entity, mut task) in &mut transform_tasks {
-        let Some(list) = check_ready(&mut task.0) else {
+        let Some(result) = check_ready(&mut task.0) else {
             continue;
         };
         commands.entity(entity).remove::<GetList>();
 
         let mut ui_root = commands.entity(*ui_root);
         ui_root.despawn_children();
-        for module in list {
+        for module in result.installed {
             ui_root.with_child((
                 Node {
                     width: Val::Percent(100.0),

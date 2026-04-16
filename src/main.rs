@@ -65,6 +65,7 @@ fn main() -> anyhow::Result<()> {
             (handle_tasks.run_if(any_with_component::<GetList>),),
         )
         .add_systems(Update, send_scroll_events)
+        .add_systems(Update, update_scroll_indicator)
         .add_observer(on_scroll_handler);
 
     // Set all schedules to single threaded to reduce cpu usage
@@ -95,7 +96,7 @@ fn main() -> anyhow::Result<()> {
 const LINE_HEIGHT: f32 = 22.;
 
 fn setup(world: &mut World) -> Result {
-    world.spawn_scene_list(bsn_list![Camera2d, ui_root()])?;
+    world.spawn_scene_list(bsn_list![Camera2d, layout_root()])?;
     Ok(())
 }
 
@@ -262,32 +263,93 @@ fn spawn_installed_table(ui_root: &mut EntityCommands, installed: &[ModuleRow]) 
 #[derive(Component, Default, Clone, Copy)]
 struct UiRoot;
 
+#[derive(Component, Default, Clone, Copy)]
+struct ScrollbarTrack;
+
+#[derive(Component, Default, Clone, Copy)]
+struct ScrollThumb;
+
+fn layout_root() -> impl Scene {
+    bsn! {
+        Node {
+            width: percent(100),
+            height: percent(100),
+            flex_direction: FlexDirection::Row,
+        }
+        ThemeBackgroundColor(tokens::WINDOW_BG)
+        Children [
+            :ui_root,
+            :scrollbar_track
+        ]
+    }
+}
+
 fn ui_root() -> impl Scene {
     bsn! {
         UiRoot
         Node {
-            width: percent(100),
+            flex_grow: 1.,
             height: percent(100),
             align_items: AlignItems::FlexStart,
             justify_content: JustifyContent::FlexStart,
             flex_direction: FlexDirection::Column,
             overflow: Overflow::scroll_y(),
-            scrollbar_width: 20.,
         }
-        ThemeBackgroundColor(tokens::WINDOW_BG)
         Children[(
             Node {
                 width: percent(100),
                 height: percent(100),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
-                margin: UiRect::horizontal(px(10.0)),
             }
-            Children[(
-                Text::new("Loading...") ThemedText
-            )]
+            Children[(Text::new("Loading...") ThemedText)]
         )]
     }
+}
+
+fn scrollbar_track() -> impl Scene {
+    bsn! {
+        ScrollbarTrack
+        Node {
+            width: px(8),
+            height: percent(100),
+        }
+        BackgroundColor(Color::srgb(0.1, 0.1, 0.1))
+        Children[(
+            ScrollThumb
+            Node {
+                position_type: PositionType::Absolute,
+                top: px(0),
+                width: percent(100),
+                height: px(0),
+            }
+            BackgroundColor(Color::srgb(0.5, 0.5, 0.5))
+        )]
+    }
+}
+
+fn update_scroll_indicator(
+    ui_root: Single<(&ScrollPosition, &ComputedNode), With<UiRoot>>,
+    track: Single<&ComputedNode, With<ScrollbarTrack>>,
+    mut thumb: Single<&mut Node, With<ScrollThumb>>,
+) {
+    let (scroll_pos, computed) = *ui_root;
+    let scale = computed.inverse_scale_factor();
+    let viewport_h = computed.size().y * scale;
+    let content_h = computed.content_size().y * scale;
+
+    if content_h <= viewport_h {
+        thumb.height = Val::Px(0.);
+        return;
+    }
+
+    let track_h = track.size().y * track.inverse_scale_factor();
+    let thumb_h = (viewport_h / content_h * track_h).max(20.);
+    let max_scroll = content_h - viewport_h;
+    let thumb_top = scroll_pos.y / max_scroll * (track_h - thumb_h);
+
+    thumb.height = Val::Px(thumb_h);
+    thumb.top = Val::Px(thumb_top);
 }
 
 fn send_scroll_events(

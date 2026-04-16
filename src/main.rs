@@ -66,7 +66,8 @@ fn main() -> anyhow::Result<()> {
         )
         .add_systems(Update, send_scroll_events)
         .add_systems(Update, update_scroll_indicator)
-        .add_observer(on_scroll_handler);
+        .add_observer(on_scroll_handler)
+        .add_observer(on_thumb_drag);
 
     // Set all schedules to single threaded to reduce cpu usage
     app.edit_schedule(First, |s| {
@@ -350,6 +351,32 @@ fn update_scroll_indicator(
 
     thumb.height = Val::Px(thumb_h);
     thumb.top = Val::Px(thumb_top);
+}
+
+fn on_thumb_drag(
+    drag: On<Pointer<Drag>>,
+    thumb_query: Query<(), With<ScrollThumb>>,
+    ui_root: Single<(&mut ScrollPosition, &ComputedNode), With<UiRoot>>,
+    track: Single<&ComputedNode, With<ScrollbarTrack>>,
+) {
+    if thumb_query.get(drag.event_target()).is_err() {
+        return;
+    }
+    let (mut scroll_pos, computed) = ui_root.into_inner();
+    let scale = computed.inverse_scale_factor();
+    let viewport_h = computed.size().y * scale;
+    let content_h = computed.content_size().y * scale;
+    if content_h <= viewport_h {
+        return;
+    }
+    let track_h = track.size().y * track.inverse_scale_factor();
+    let thumb_h = (viewport_h / content_h * track_h).max(20.);
+    let max_scroll = content_h - viewport_h;
+    let scroll_range = track_h - thumb_h;
+    if scroll_range <= 0. {
+        return;
+    }
+    scroll_pos.y = (scroll_pos.y + drag.delta.y / scroll_range * max_scroll).clamp(0., max_scroll);
 }
 
 fn send_scroll_events(

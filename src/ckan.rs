@@ -7,6 +7,25 @@ use std::path::{Path, PathBuf};
 #[derive(Deserialize)]
 pub struct Registry {
     pub sorted_repositories: HashMap<String, RegistryRepo>,
+    pub installed_modules: HashMap<String, Module>,
+}
+
+#[derive(Deserialize)]
+pub struct Module {
+    pub install_time: String,
+    pub source_module: SourceModule,
+    pub auto_installed: Option<bool>,
+}
+
+#[derive(Deserialize)]
+pub struct SourceModule {
+    pub identifier: String,
+    pub name: String,
+    #[serde(rename = "abstract")]
+    pub short_description: String,
+    #[serde(deserialize_with = "one_or_many_string")]
+    pub author: Vec<String>,
+    pub version: String,
 }
 
 #[allow(unused)]

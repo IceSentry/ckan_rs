@@ -68,39 +68,23 @@ fn startup_tasks(mut commands: Commands) {
         let _ = ckan::run_command(&["scan"]);
         let _ = ckan::run_command(&["update"]);
 
-        // let list = xshell::cmd!(sh, "./ckan.exe list --porcelain")
-        //     .read()
-        //     .expect("Failed to get list");
-        //
-        // let installed = list
-        //     .lines()
-        //     .map(|l| {
-        //         let mut line_iter = l.split_whitespace();
-        //         let status = line_iter.next().expect("status");
-        //         let id = line_iter.next().expect("id").trim();
-        //         let version = line_iter.next().expect("version").trim();
-        //         ListEntry {
-        //             status: ListEntryStatus::from_str(status),
-        //             id: id.to_string(),
-        //             version: version.to_string(),
-        //         }
-        //     })
-        //     .collect::<Vec<_>>();
-
         let instance_path = ckan::default_instance_path().unwrap();
         let registry = ckan::get_registry(instance_path).unwrap();
-        let repo = ckan::get_repo(&registry).unwrap();
 
-        for (module_id, module) in repo.available_modules {
-            if let Some((version, _ckan_module)) = module.module_version.iter().last() {
-                // println!("{module_id} ({version})");
-            }
-        }
+        // TODO available
+        // let repo = ckan::get_repo(&registry).unwrap();
+        //
+        // for (module_id, module) in repo.available_modules {
+        //     if let Some((version, _ckan_module)) = module.module_version.iter().last() {
+        //         // println!("{module_id} ({version})");
+        //     }
+        // }
 
         let mut installed = vec![];
-        for _ in 0..20 {
-            installed.push("AAAAAAAAAAAAAAAAAAA".to_string());
+        for module in registry.installed_modules.values() {
+            installed.push(module.source_module.name.clone());
         }
+        installed.sort_unstable();
         TaskResult { installed }
     });
     commands.spawn(GetList(task));

@@ -190,14 +190,18 @@ fn horizontal_serparator() -> impl Scene {
 }
 
 fn installed_row(row: ModuleRow) -> impl Scene {
-    let outdated = row.installed_version != row.latest_version;
+    let bg_color = if row.installed_version != row.latest_version {
+        Color::srgb(0.5, 0.0, 0.0)
+    } else {
+        Color::NONE
+    };
     bsn! {
         Node {
             margin: UiRect::horizontal(px(10.0)),
             height: px(LINE_HEIGHT),
             width: percent(100),
         }
-        @if outdated { BackgroundColor(Color::srgb(0.5, 0.0, 0.0)) }
+        BackgroundColor(bg_color)
         Children [
             (
                 Node {
@@ -214,7 +218,7 @@ fn installed_row(row: ModuleRow) -> impl Scene {
             (
                 Node {
                     margin: UiRect::horizontal(px(5.0)),
-                    width: px(75.0),
+                    width: px(150.0),
                     height: percent(100),
                     overflow: Overflow::clip(),
                     justify_content: JustifyContent::Start,
@@ -226,7 +230,7 @@ fn installed_row(row: ModuleRow) -> impl Scene {
             (
                 Node {
                     margin: UiRect::horizontal(px(5.0)),
-                    width: px(75.0),
+                    width: px(250.0),
                     height: percent(100),
                     overflow: Overflow::clip(),
                     justify_content: JustifyContent::Start,

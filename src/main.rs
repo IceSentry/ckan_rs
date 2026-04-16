@@ -1,3 +1,4 @@
+use argh::FromArgs;
 use bevy::{
     ecs::schedule::SingleThreadedExecutor,
     feathers::{
@@ -17,7 +18,43 @@ use bevy::{
 
 mod ckan;
 
+/// CKAN mod manager
+#[derive(FromArgs)]
+struct Args {
+    #[argh(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(FromArgs)]
+#[argh(subcommand)]
+enum Command {
+    List(ListCommand),
+}
+
+/// Print the list of installed mods and exit
+#[derive(FromArgs)]
+#[argh(subcommand, name = "list")]
+struct ListCommand {}
+
 fn main() -> anyhow::Result<()> {
+    let args: Args = argh::from_env();
+
+    if matches!(args.command, Some(Command::List(_))) {
+        let _ = ckan::run_command(&["scan"]);
+        let instance_path = ckan::default_instance_path()?;
+        let registry = ckan::get_registry(instance_path)?;
+        let mut installed: Vec<String> = registry
+            .installed_modules
+            .values()
+            .map(|m| m.source_module.name.clone())
+            .collect();
+        installed.sort_unstable();
+        for name in installed {
+            println!("{name}");
+        }
+        return Ok(());
+    }
+
     let mut app = App::new();
     app.add_plugins((DefaultPlugins, FeathersPlugins))
         .insert_resource(UiTheme(create_dark_theme()))
@@ -66,7 +103,14 @@ fn setup(world: &mut World) -> Result {
 struct GetList(Task<TaskResult>);
 
 struct TaskResult {
-    installed: Vec<String>,
+    installed: Vec<ModuleRow>,
+}
+
+#[derive(Clone)]
+struct ModuleRow {
+    name: String,
+    installed_version: String,
+    latest_version: String,
 }
 
 fn startup_tasks(mut commands: Commands) {
@@ -79,7 +123,7 @@ fn startup_tasks(mut commands: Commands) {
         let registry = ckan::get_registry(instance_path).unwrap();
 
         // TODO available
-        // let repo = ckan::get_repo(&registry).unwrap();
+        let repo = ckan::get_repo(&registry).unwrap();
         //
         // for (module_id, module) in repo.available_modules {
         //     if let Some((version, _ckan_module)) = module.module_version.iter().last() {
@@ -89,9 +133,16 @@ fn startup_tasks(mut commands: Commands) {
 
         let mut installed = vec![];
         for module in registry.installed_modules.values() {
-            installed.push(module.source_module.name.clone());
+            let module = &module.source_module;
+            let repo_module = repo.available_modules.get(&module.identifier).unwrap();
+            let (latest_version, _) = repo_module.module_version.iter().last().unwrap();
+            installed.push(ModuleRow {
+                name: module.name.clone(),
+                installed_version: module.version.clone(),
+                latest_version: latest_version.to_string(),
+            });
         }
-        installed.sort_unstable();
+        // installed.sort_unstable();
         TaskResult { installed }
     });
     commands.spawn(GetList(task));
@@ -138,40 +189,66 @@ fn horizontal_serparator() -> impl Scene {
     )
 }
 
-fn installed_row(module: String) -> impl Scene {
+fn installed_row(row: ModuleRow) -> impl Scene {
+    let outdated = row.installed_version != row.latest_version;
     bsn! {
         Node {
             margin: UiRect::horizontal(px(10.0)),
             height: px(LINE_HEIGHT),
             width: percent(100),
         }
+        @if outdated { BackgroundColor(Color::srgb(0.5, 0.0, 0.0)) }
         Children [
             (
                 Node {
                     margin: UiRect::horizontal(px(5.0)),
-                    width: px(500.0),
+                    width: px(400.0),
                     height: percent(100),
                     overflow: Overflow::clip(),
                     justify_content: JustifyContent::Start,
                     align_items: AlignItems::Center,
                 }
-                :label(module.clone())
+                :label(row.name.clone())
+            ),
+            :vertical_serparator,
+            (
+                Node {
+                    margin: UiRect::horizontal(px(5.0)),
+                    width: px(75.0),
+                    height: percent(100),
+                    overflow: Overflow::clip(),
+                    justify_content: JustifyContent::Start,
+                    align_items: AlignItems::Center,
+                }
+                :label(row.installed_version.clone())
+            ),
+            :vertical_serparator,
+            (
+                Node {
+                    margin: UiRect::horizontal(px(5.0)),
+                    width: px(75.0),
+                    height: percent(100),
+                    overflow: Overflow::clip(),
+                    justify_content: JustifyContent::Start,
+                    align_items: AlignItems::Center,
+                }
+                :label(row.latest_version.clone())
             ),
             :vertical_serparator
         ]
     }
 }
 
-fn spawn_installed_table(ui_root: &mut EntityCommands, installed: &[String]) {
-    for module in installed {
-        let module = module.clone();
+fn spawn_installed_table(ui_root: &mut EntityCommands, installed: &[ModuleRow]) {
+    for row in installed {
+        let row = row.clone();
         ui_root.queue_spawn_related_scenes::<Children>(bsn_list! {(
             Node {
                 width: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
             }
             Children [
-                :installed_row(module),
+                :installed_row(row),
                 :horizontal_serparator
             ]
         )});

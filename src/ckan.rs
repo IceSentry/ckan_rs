@@ -13,7 +13,7 @@ pub struct Registry {
 #[derive(Deserialize)]
 pub struct Module {
     pub install_time: String,
-    pub source_module: SourceModule,
+    pub source_module: CkanModule,
     pub auto_installed: Option<bool>,
 }
 

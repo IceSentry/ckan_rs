@@ -123,50 +123,43 @@ impl ListEntryStatus {
 fn startup_tasks(mut commands: Commands) {
     let pool = AsyncComputeTaskPool::get();
     let task = pool.spawn(async move {
-        let sh = Shell::new().expect("Failed to init shell");
+        let _ = ckan::run_command(&["scan"]);
+        let _ = ckan::run_command(&["update"]);
 
-        xshell::cmd!(sh, "./ckan.exe scan")
-            .run()
-            .expect("Failed to update ckan");
+        // let list = xshell::cmd!(sh, "./ckan.exe list --porcelain")
+        //     .read()
+        //     .expect("Failed to get list");
+        //
+        // let installed = list
+        //     .lines()
+        //     .map(|l| {
+        //         let mut line_iter = l.split_whitespace();
+        //         let status = line_iter.next().expect("status");
+        //         let id = line_iter.next().expect("id").trim();
+        //         let version = line_iter.next().expect("version").trim();
+        //         ListEntry {
+        //             status: ListEntryStatus::from_str(status),
+        //             id: id.to_string(),
+        //             version: version.to_string(),
+        //         }
+        //     })
+        //     .collect::<Vec<_>>();
 
-        xshell::cmd!(sh, "./ckan.exe update")
-            .run()
-            .expect("Failed to update ckan");
-
-        let list = xshell::cmd!(sh, "./ckan.exe list --porcelain")
-            .read()
-            .expect("Failed to get list");
-
-        let installed = list
-            .lines()
-            .map(|l| {
-                let mut line_iter = l.split_whitespace();
-                let status = line_iter.next().expect("status");
-                let id = line_iter.next().expect("id").trim();
-                let version = line_iter.next().expect("version").trim();
-                ListEntry {
-                    status: ListEntryStatus::from_str(status),
-                    id: id.to_string(),
-                    version: version.to_string(),
-                }
-            })
-            .collect::<Vec<_>>();
-
-        let repo = ckan::get_repo().unwrap();
+        let repo = ckan::get_default_repo().unwrap();
         for (module_id, module) in repo.available_modules {
             if let Some((version, _ckan_module)) = module.module_version.iter().last() {
-                println!("{module_id} ({version})");
+                // println!("{module_id} ({version})");
             }
         }
 
-        // let mut installed = vec![];
-        // for _ in 0..20 {
-        //     installed.push(ListEntry {
-        //         status: ListEntryStatus::AutoInstalled,
-        //         id: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
-        //         version: "(unmanaged)".to_string(),
-        //     });
-        // }
+        let mut installed = vec![];
+        for _ in 0..20 {
+            installed.push(ListEntry {
+                status: ListEntryStatus::AutoInstalled,
+                id: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+                version: "(unmanaged)".to_string(),
+            });
+        }
         TaskResult { installed }
     });
     commands.spawn(GetList(task));

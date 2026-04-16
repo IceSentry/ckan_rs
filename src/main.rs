@@ -118,21 +118,20 @@ struct ModuleRow {
 fn startup_tasks(mut commands: Commands) {
     let pool = AsyncComputeTaskPool::get();
     let task = pool.spawn(async move {
+        info!("ckan scan");
         let _ = ckan::run_command(&["scan"]);
+        info!("ckan update");
         let _ = ckan::run_command(&["update"]);
 
         let instance_path = ckan::default_instance_path().unwrap();
+        info!("Getting ckan registry");
         let registry = ckan::get_registry(instance_path).unwrap();
 
         // TODO available
+        info!("Getting repo from registry");
         let repo = ckan::get_repo(&registry).unwrap();
-        //
-        // for (module_id, module) in repo.available_modules {
-        //     if let Some((version, _ckan_module)) = module.module_version.iter().last() {
-        //         // println!("{module_id} ({version})");
-        //     }
-        // }
 
+        info!("Populating installed list");
         let mut installed = vec![];
         for module in registry.installed_modules.values() {
             let module = &module.source_module;
@@ -144,6 +143,7 @@ fn startup_tasks(mut commands: Commands) {
                 latest_version: latest_version.to_string(),
             });
         }
+        info!("Tasks done");
         // installed.sort_unstable();
         TaskResult { installed }
     });

@@ -3,9 +3,12 @@ use bevy::{
     feathers::{
         FeathersPlugins,
         dark_theme::create_dark_theme,
+        display::{icon, label, label_dim},
         theme::{ThemeBackgroundColor, ThemedText, UiTheme},
         tokens,
     },
+    input::mouse::{MouseScrollUnit, MouseWheel},
+    picking::hover::HoverMap,
     prelude::*,
     render::Render,
     tasks::{AsyncComputeTaskPool, Task, futures::check_ready},
@@ -23,7 +26,9 @@ fn main() -> anyhow::Result<()> {
         .add_systems(
             Update,
             (handle_tasks.run_if(any_with_component::<GetList>),),
-        );
+        )
+        .add_systems(Update, send_scroll_events)
+        .add_observer(on_scroll_handler);
 
     // Set all schedules to single threaded to reduce cpu usage
     app.edit_schedule(First, |s| {
@@ -50,8 +55,10 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+const LINE_HEIGHT: f32 = 22.;
+
 fn setup(world: &mut World) -> Result {
-    world.spawn_scene_list(bsn_list![Camera2d, demo_root()])?;
+    world.spawn_scene_list(bsn_list![Camera2d, ui_root()])?;
     Ok(())
 }
 
@@ -107,90 +114,74 @@ fn handle_tasks(
 
         let mut ui_root = commands.entity(*ui_root);
         ui_root.despawn_children();
-        for module in result.installed {
-            ui_root.with_child((
-                Node {
-                    width: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Column,
-                    ..Default::default()
-                },
-                children![
-                    (
-                        Node {
-                            margin: UiRect::horizontal(px(10.0)),
-                            height: px(24),
-                            width: percent(100),
-                            flex_direction: FlexDirection::Row,
-                            ..Default::default()
-                        },
-                        children![
-                            (
-                                Node {
-                                    margin: UiRect::horizontal(px(5.0)),
-                                    width: Val::Px(500.0),
-                                    height: percent(100),
-                                    overflow: Overflow::clip(),
-                                    flex_direction: FlexDirection::Column,
-                                    ..Default::default()
-                                },
-                                children![(Text::new(module), ThemedText)]
-                            ),
-                            // (
-                            //     Node {
-                            //         width: px(1),
-                            //         height: percent(100),
-                            //         ..Default::default()
-                            //     },
-                            //     ThemeBackgroundColor(tokens::MENU_BORDER)
-                            // ),
-                            // (
-                            //     Node {
-                            //         margin: UiRect::horizontal(px(5.0)),
-                            //         width: Val::Px(140.0),
-                            //         height: percent(100),
-                            //         overflow: Overflow::clip(),
-                            //         ..Default::default()
-                            //     },
-                            //     children![(Text::new(format!("{}", module.version)), ThemedText)]
-                            // ),
-                            // (
-                            //     Node {
-                            //         width: px(1),
-                            //         height: percent(100),
-                            //         ..Default::default()
-                            //     },
-                            //     ThemeBackgroundColor(tokens::MENU_BORDER)
-                            // ),
-                            // (
-                            //     Node {
-                            //         margin: UiRect::horizontal(px(5)),
-                            //         // width: Val::Auto,
-                            //         // height: px(16),
-                            //         overflow: Overflow::clip(),
-                            //         ..Default::default()
-                            //     },
-                            //     children![(Text::new(format!("{}", module.id)), ThemedText,)]
-                            // )
-                        ]
-                    ),
-                    (
-                        Node {
-                            height: px(1),
-                            width: percent(100),
-                            ..Default::default()
-                        },
-                        ThemeBackgroundColor(tokens::MENU_BORDER)
-                    )
-                ],
-            ));
+        spawn_installed_table(&mut ui_root, &result.installed);
+    }
+}
+
+fn vertical_serparator() -> impl Scene {
+    bsn!(
+        Node {
+            width: px(1),
+            height: percent(100),
         }
+        ThemeBackgroundColor(tokens::MENU_BORDER)
+    )
+}
+
+fn horizontal_serparator() -> impl Scene {
+    bsn!(
+        Node {
+            height: px(1),
+            width: percent(100),
+        }
+        ThemeBackgroundColor(tokens::MENU_BORDER)
+    )
+}
+
+fn installed_row(module: String) -> impl Scene {
+    bsn! {
+        Node {
+            margin: UiRect::horizontal(px(10.0)),
+            height: px(LINE_HEIGHT),
+            width: percent(100),
+        }
+        Children [
+            (
+                Node {
+                    margin: UiRect::horizontal(px(5.0)),
+                    width: px(500.0),
+                    height: percent(100),
+                    overflow: Overflow::clip(),
+                    justify_content: JustifyContent::Start,
+                    align_items: AlignItems::Center,
+                }
+                :label(module.clone())
+            ),
+            :vertical_serparator
+        ]
+    }
+}
+
+fn spawn_installed_table(ui_root: &mut EntityCommands, installed: &[String]) {
+    for module in installed {
+        let module = module.clone();
+        ui_root.queue_spawn_related_scenes::<Children>(bsn_list! {(
+            Node {
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+            }
+            Children [
+                :installed_row(module),
+                :horizontal_serparator
+            ]
+        )});
     }
 }
 
 #[derive(Component, Default, Clone, Copy)]
 struct UiRoot;
 
-fn demo_root() -> impl Scene {
+fn ui_root() -> impl Scene {
     bsn! {
         UiRoot
         Node {
@@ -199,6 +190,8 @@ fn demo_root() -> impl Scene {
             align_items: AlignItems::FlexStart,
             justify_content: JustifyContent::FlexStart,
             flex_direction: FlexDirection::Column,
+            overflow: Overflow::scroll_y(),
+            scrollbar_width: 20.,
         }
         ThemeBackgroundColor(tokens::WINDOW_BG)
         Children[(
@@ -213,5 +206,81 @@ fn demo_root() -> impl Scene {
                 Text::new("Loading...") ThemedText
             )]
         )]
+    }
+}
+
+fn send_scroll_events(
+    mut mouse_wheel_reader: MessageReader<MouseWheel>,
+    hover_map: Res<HoverMap>,
+    mut commands: Commands,
+) {
+    for mouse_wheel in mouse_wheel_reader.read() {
+        let mut delta = -Vec2::new(mouse_wheel.x, mouse_wheel.y);
+
+        if mouse_wheel.unit == MouseScrollUnit::Line {
+            delta *= LINE_HEIGHT * 2.0;
+        }
+
+        for pointer_map in hover_map.values() {
+            for entity in pointer_map.keys().copied() {
+                commands.trigger(Scroll { entity, delta });
+            }
+        }
+    }
+}
+
+/// UI scrolling event.
+#[derive(EntityEvent, Debug)]
+#[entity_event(propagate, auto_propagate)]
+struct Scroll {
+    entity: Entity,
+    /// Scroll delta in logical coordinates.
+    delta: Vec2,
+}
+
+fn on_scroll_handler(
+    mut scroll: On<Scroll>,
+    mut query: Query<(&mut ScrollPosition, &Node, &ComputedNode)>,
+) {
+    let Ok((mut scroll_position, node, computed)) = query.get_mut(scroll.entity) else {
+        return;
+    };
+
+    let max_offset = (computed.content_size() - computed.size()) * computed.inverse_scale_factor();
+
+    let delta = &mut scroll.delta;
+    if node.overflow.x == OverflowAxis::Scroll && delta.x != 0. {
+        // Is this node already scrolled all the way in the direction of the scroll?
+        let max = if delta.x > 0. {
+            scroll_position.x >= max_offset.x
+        } else {
+            scroll_position.x <= 0.
+        };
+
+        if !max {
+            scroll_position.x += delta.x;
+            // Consume the X portion of the scroll delta.
+            delta.x = 0.;
+        }
+    }
+
+    if node.overflow.y == OverflowAxis::Scroll && delta.y != 0. {
+        // Is this node already scrolled all the way in the direction of the scroll?
+        let max = if delta.y > 0. {
+            scroll_position.y >= max_offset.y
+        } else {
+            scroll_position.y <= 0.
+        };
+
+        if !max {
+            scroll_position.y += delta.y;
+            // Consume the Y portion of the scroll delta.
+            delta.y = 0.;
+        }
+    }
+
+    // Stop propagating when the delta is fully consumed.
+    if *delta == Vec2::ZERO {
+        scroll.propagate(false);
     }
 }

@@ -1,40 +1,18 @@
 use bevy::{
-    color::palettes::css::{BLUE, LIME, RED},
     ecs::schedule::SingleThreadedExecutor,
     feathers::{
         FeathersPlugins,
-        controls::{ButtonProps, button},
         dark_theme::create_dark_theme,
         theme::{ThemeBackgroundColor, ThemedText, UiTheme},
         tokens,
     },
-    platform::collections::HashMap,
     prelude::*,
     render::Render,
     tasks::{AsyncComputeTaskPool, Task, futures::check_ready},
-    ui_widgets::Activate,
     winit::{EventLoopProxyWrapper, WinitSettings, WinitUserEvent},
 };
-use rand::{RngExt, SeedableRng, rngs::SmallRng};
-use serde::Deserialize;
-use xshell::Shell;
 
 mod ckan;
-
-// ["identifier", "version", "name", "abstract", "description", "author", "kind",
-// "download", "download_size", "ksp_version", "ksp_version_min", "ksp_version_max", "license",
-// "release_status", "repository", "homepage", "bugtracker", "discussions", "spacedock", "curse"]
-#[derive(Debug, serde::Deserialize)]
-struct Record {
-    identifier: String,
-    version: String,
-    name: String,
-    r#abstract: String,
-    description: Option<String>,
-    author: String,
-    kind: String,
-    release_status: String,
-}
 
 fn main() -> anyhow::Result<()> {
     let mut app = App::new();
@@ -81,43 +59,7 @@ fn setup(world: &mut World) -> Result {
 struct GetList(Task<TaskResult>);
 
 struct TaskResult {
-    installed: Vec<ListEntry>,
-}
-
-#[derive(Debug)]
-struct ListEntry {
-    status: ListEntryStatus,
-    id: String,
-    version: String,
-}
-
-#[derive(Debug)]
-enum ListEntryStatus {
-    UpToDate,
-    AutoInstalled,
-    Incompatible,
-    Upgradable,
-    Replaceable,
-    Autodetected,
-    Unknown,
-    Broken,
-}
-
-impl ListEntryStatus {
-    fn from_str(s: &str) -> Self {
-        let c = s.chars().next().expect("status char");
-        match c {
-            '-' => Self::UpToDate,
-            '+' => Self::AutoInstalled,
-            'X' => Self::Incompatible,
-            '^' => Self::Upgradable,
-            '>' => Self::Replaceable,
-            'A' => Self::Autodetected,
-            '?' => Self::Unknown,
-            '*' => Self::Broken,
-            _ => panic!("Unknown module status: {c}"),
-        }
-    }
+    installed: Vec<String>,
 }
 
 fn startup_tasks(mut commands: Commands) {
@@ -145,7 +87,10 @@ fn startup_tasks(mut commands: Commands) {
         //     })
         //     .collect::<Vec<_>>();
 
-        let repo = ckan::get_default_repo().unwrap();
+        let instance_path = ckan::default_instance_path().unwrap();
+        let registry = ckan::get_registry(instance_path).unwrap();
+        let repo = ckan::get_repo(&registry).unwrap();
+
         for (module_id, module) in repo.available_modules {
             if let Some((version, _ckan_module)) = module.module_version.iter().last() {
                 // println!("{module_id} ({version})");
@@ -154,11 +99,7 @@ fn startup_tasks(mut commands: Commands) {
 
         let mut installed = vec![];
         for _ in 0..20 {
-            installed.push(ListEntry {
-                status: ListEntryStatus::AutoInstalled,
-                id: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
-                version: "(unmanaged)".to_string(),
-            });
+            installed.push("AAAAAAAAAAAAAAAAAAA".to_string());
         }
         TaskResult { installed }
     });
@@ -202,50 +143,50 @@ fn handle_tasks(
                             (
                                 Node {
                                     margin: UiRect::horizontal(px(5.0)),
-                                    width: Val::Px(165.0),
+                                    width: Val::Px(500.0),
                                     height: percent(100),
                                     overflow: Overflow::clip(),
                                     flex_direction: FlexDirection::Column,
                                     ..Default::default()
                                 },
-                                children![(Text::new(format!("{:?}", module.status)), ThemedText)]
+                                children![(Text::new(module), ThemedText)]
                             ),
-                            (
-                                Node {
-                                    width: px(1),
-                                    height: percent(100),
-                                    ..Default::default()
-                                },
-                                ThemeBackgroundColor(tokens::MENU_BORDER)
-                            ),
-                            (
-                                Node {
-                                    margin: UiRect::horizontal(px(5.0)),
-                                    width: Val::Px(140.0),
-                                    height: percent(100),
-                                    overflow: Overflow::clip(),
-                                    ..Default::default()
-                                },
-                                children![(Text::new(format!("{}", module.version)), ThemedText)]
-                            ),
-                            (
-                                Node {
-                                    width: px(1),
-                                    height: percent(100),
-                                    ..Default::default()
-                                },
-                                ThemeBackgroundColor(tokens::MENU_BORDER)
-                            ),
-                            (
-                                Node {
-                                    margin: UiRect::horizontal(px(5)),
-                                    // width: Val::Auto,
-                                    // height: px(16),
-                                    overflow: Overflow::clip(),
-                                    ..Default::default()
-                                },
-                                children![(Text::new(format!("{}", module.id)), ThemedText,)]
-                            )
+                            // (
+                            //     Node {
+                            //         width: px(1),
+                            //         height: percent(100),
+                            //         ..Default::default()
+                            //     },
+                            //     ThemeBackgroundColor(tokens::MENU_BORDER)
+                            // ),
+                            // (
+                            //     Node {
+                            //         margin: UiRect::horizontal(px(5.0)),
+                            //         width: Val::Px(140.0),
+                            //         height: percent(100),
+                            //         overflow: Overflow::clip(),
+                            //         ..Default::default()
+                            //     },
+                            //     children![(Text::new(format!("{}", module.version)), ThemedText)]
+                            // ),
+                            // (
+                            //     Node {
+                            //         width: px(1),
+                            //         height: percent(100),
+                            //         ..Default::default()
+                            //     },
+                            //     ThemeBackgroundColor(tokens::MENU_BORDER)
+                            // ),
+                            // (
+                            //     Node {
+                            //         margin: UiRect::horizontal(px(5)),
+                            //         // width: Val::Auto,
+                            //         // height: px(16),
+                            //         overflow: Overflow::clip(),
+                            //         ..Default::default()
+                            //     },
+                            //     children![(Text::new(format!("{}", module.id)), ThemedText,)]
+                            // )
                         ]
                     ),
                     (

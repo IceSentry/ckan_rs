@@ -58,7 +58,7 @@ fn one_or_many_string<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D:
 }
 
 /// Get the default instance path from the cli
-fn default_instance_path() -> anyhow::Result<PathBuf> {
+pub fn default_instance_path() -> anyhow::Result<PathBuf> {
     let output = run_command(&["instance", "list"])?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -85,11 +85,14 @@ fn default_instance_path() -> anyhow::Result<PathBuf> {
     Ok(PathBuf::from(path))
 }
 
-pub fn get_default_repo() -> anyhow::Result<Repo> {
-    let registry_path = default_instance_path()?.join("CKAN").join("registry.json");
+pub fn get_registry<P: AsRef<Path>>(instance_path: P) -> anyhow::Result<Registry> {
+    let registry_path = instance_path.as_ref().join("CKAN").join("registry.json");
     let registry: Registry =
         read_json_file(registry_path).context("Failed to read registry.json")?;
+    Ok(registry)
+}
 
+pub fn get_repo(registry: &Registry) -> anyhow::Result<Repo> {
     let repos_dir = PathBuf::from(std::env::var("LOCALAPPDATA").context("LOCALAPPDATA not set")?)
         .join("CKAN")
         .join("repos");

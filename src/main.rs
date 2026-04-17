@@ -168,17 +168,12 @@ fn startup_tasks(mut commands: Commands) {
             })
         }
 
-        // for module in registry.installed_modules.values() {
-        //     let module = &module.source_module;
-        //     let repo_module = repo.available_modules.get(&module.identifier).unwrap();
-        //     let (latest_version, _) = repo_module.module_version.iter().last().unwrap();
-        //     list.push(ModuleRow {
-        //         name: module.name.clone(),
-        //         installed_version: Some(module.version.clone()),
-        //         latest_version: latest_version.to_string(),
-        //     });
-        // }
-        list.sort_unstable_by_key(|i| i.name.clone());
+        list.sort_unstable_by(|a, b| {
+            b.installed_version
+                .is_some()
+                .cmp(&a.installed_version.is_some())
+                .then_with(|| a.name.cmp(&b.name))
+        });
         info!("Tasks done");
         // installed.sort_unstable();
         TaskResult { list }
@@ -250,7 +245,6 @@ fn installed_row(row: ModuleRow) -> impl Scene {
 
     bsn! {
         Node {
-            margin: UiRect::horizontal(px(10.0)),
             height: px(LINE_HEIGHT),
             width: percent(100),
         }
@@ -262,7 +256,7 @@ fn installed_row(row: ModuleRow) -> impl Scene {
                     width: px(20.0),
                     height: percent(100),
                     overflow: Overflow::clip(),
-                    justify_content: JustifyContent::Start,
+                    justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
                 }
                 :label(installed_label)

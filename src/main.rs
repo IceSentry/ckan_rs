@@ -4,7 +4,7 @@ use bevy::{
     feathers::{
         FeathersPlugins,
         dark_theme::create_dark_theme,
-        display::{icon, label, label_dim},
+        display::label,
         theme::{ThemeBackgroundColor, ThemedText, UiTheme},
         tokens,
     },
@@ -79,13 +79,36 @@ fn main() -> anyhow::Result<()> {
     app.edit_schedule(Update, |s| {
         s.set_executor(SingleThreadedExecutor::new());
     });
+    app.edit_schedule(SpawnScene, |s| {
+        s.set_executor(SingleThreadedExecutor::new());
+    });
     app.edit_schedule(PostUpdate, |s| {
         s.set_executor(SingleThreadedExecutor::new());
     });
     app.edit_schedule(Last, |s| {
         s.set_executor(SingleThreadedExecutor::new());
     });
+
+    app.edit_schedule(FixedFirst, |s| {
+        s.set_executor(SingleThreadedExecutor::new());
+    });
+    app.edit_schedule(FixedPreUpdate, |s| {
+        s.set_executor(SingleThreadedExecutor::new());
+    });
+    app.edit_schedule(FixedUpdate, |s| {
+        s.set_executor(SingleThreadedExecutor::new());
+    });
+    app.edit_schedule(FixedPostUpdate, |s| {
+        s.set_executor(SingleThreadedExecutor::new());
+    });
+    app.edit_schedule(FixedLast, |s| {
+        s.set_executor(SingleThreadedExecutor::new());
+    });
+
     app.edit_schedule(Render, |s| {
+        s.set_executor(SingleThreadedExecutor::new());
+    });
+    app.edit_schedule(ExtractSchedule, |s| {
         s.set_executor(SingleThreadedExecutor::new());
     });
 
@@ -127,7 +150,6 @@ fn startup_tasks(mut commands: Commands) {
         info!("Getting ckan registry");
         let registry = ckan::get_registry(instance_path).unwrap();
 
-        // TODO available
         info!("Getting repo from registry");
         let repo = ckan::get_repo(&registry).unwrap();
 
@@ -143,6 +165,7 @@ fn startup_tasks(mut commands: Commands) {
                 latest_version: latest_version.to_string(),
             });
         }
+        installed.sort_unstable_by_key(|i| i.name.clone());
         info!("Tasks done");
         // installed.sort_unstable();
         TaskResult { installed }

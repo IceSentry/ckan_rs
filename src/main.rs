@@ -128,13 +128,13 @@ fn setup(world: &mut World) -> Result {
 struct GetList(Task<TaskResult>);
 
 struct TaskResult {
-    installed: Vec<ModuleRow>,
+    list: Vec<ModuleRow>,
 }
 
 #[derive(Clone)]
 struct ModuleRow {
     name: String,
-    installed_version: String,
+    installed_version: Option<String>,
     latest_version: String,
 }
 
@@ -154,21 +154,34 @@ fn startup_tasks(mut commands: Commands) {
         let repo = ckan::get_repo(&registry).unwrap();
 
         info!("Populating installed list");
-        let mut installed = vec![];
-        for module in registry.installed_modules.values() {
-            let module = &module.source_module;
-            let repo_module = repo.available_modules.get(&module.identifier).unwrap();
-            let (latest_version, _) = repo_module.module_version.iter().last().unwrap();
-            installed.push(ModuleRow {
-                name: module.name.clone(),
-                installed_version: module.version.clone(),
-                latest_version: latest_version.to_string(),
-            });
+        let mut list = vec![];
+        for (module_id, versions) in repo.available_modules {
+            let (latest_version, module_metadata) = versions.module_version.iter().last().unwrap();
+            let installed_version = registry
+                .installed_modules
+                .get(&module_id)
+                .map(|installed_module| installed_module.source_module.version.clone());
+            list.push(ModuleRow {
+                name: module_metadata.name.clone(),
+                installed_version,
+                latest_version: latest_version.clone(),
+            })
         }
-        installed.sort_unstable_by_key(|i| i.name.clone());
+
+        // for module in registry.installed_modules.values() {
+        //     let module = &module.source_module;
+        //     let repo_module = repo.available_modules.get(&module.identifier).unwrap();
+        //     let (latest_version, _) = repo_module.module_version.iter().last().unwrap();
+        //     list.push(ModuleRow {
+        //         name: module.name.clone(),
+        //         installed_version: Some(module.version.clone()),
+        //         latest_version: latest_version.to_string(),
+        //     });
+        // }
+        list.sort_unstable_by_key(|i| i.name.clone());
         info!("Tasks done");
         // installed.sort_unstable();
-        TaskResult { installed }
+        TaskResult { list }
     });
     commands.spawn(GetList(task));
 }
@@ -190,7 +203,7 @@ fn handle_tasks(
 
         let mut ui_root = commands.entity(*ui_root);
         ui_root.despawn_children();
-        spawn_installed_table(&mut ui_root, &result.installed);
+        spawn_installed_table(&mut ui_root, &result.list);
     }
 }
 
@@ -215,11 +228,26 @@ fn horizontal_serparator() -> impl Scene {
 }
 
 fn installed_row(row: ModuleRow) -> impl Scene {
-    let bg_color = if row.installed_version != row.latest_version {
+    let bg_color = if row
+        .installed_version
+        .as_ref()
+        .is_some_and(|v| *v != row.latest_version)
+    {
         Color::srgb(0.5, 0.0, 0.0)
     } else {
         Color::NONE
     };
+    let installed_label = if row.installed_version.is_some() {
+        "x"
+    } else {
+        ""
+    };
+    let installed_version = if let Some(v) = row.installed_version {
+        v.clone()
+    } else {
+        "-".to_string().clone()
+    };
+
     bsn! {
         Node {
             margin: UiRect::horizontal(px(10.0)),
@@ -228,6 +256,18 @@ fn installed_row(row: ModuleRow) -> impl Scene {
         }
         BackgroundColor(bg_color)
         Children [
+            (
+                Node {
+                    margin: UiRect::horizontal(px(5.0)),
+                    width: px(20.0),
+                    height: percent(100),
+                    overflow: Overflow::clip(),
+                    justify_content: JustifyContent::Start,
+                    align_items: AlignItems::Center,
+                }
+                :label(installed_label)
+            ),
+            :vertical_serparator,
             (
                 Node {
                     margin: UiRect::horizontal(px(5.0)),
@@ -249,7 +289,7 @@ fn installed_row(row: ModuleRow) -> impl Scene {
                     justify_content: JustifyContent::Start,
                     align_items: AlignItems::Center,
                 }
-                :label(row.installed_version.clone())
+                :label(installed_version)
             ),
             :vertical_serparator,
             (

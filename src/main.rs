@@ -303,6 +303,63 @@ fn installed_row(row: ModuleRow) -> impl Scene {
 }
 
 fn spawn_installed_table(ui_root: &mut EntityCommands, installed: &[ModuleRow]) {
+    ui_root.queue_spawn_related_scenes::<Children>(bsn_list! {
+        Node {
+            height: px(LINE_HEIGHT),
+            width: percent(100),
+        }
+        Children [
+            (
+                Node {
+                    margin: UiRect::horizontal(px(5.0)),
+                    width: px(20.0),
+                    height: percent(100),
+                    overflow: Overflow::clip(),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                }
+                :label("Installed")
+            ),
+            :vertical_serparator,
+            (
+                Node {
+                    margin: UiRect::horizontal(px(5.0)),
+                    width: px(400.0),
+                    height: percent(100),
+                    overflow: Overflow::clip(),
+                    justify_content: JustifyContent::Start,
+                    align_items: AlignItems::Center,
+                }
+                :label("Name")
+            ),
+            :vertical_serparator,
+            (
+                Node {
+                    margin: UiRect::horizontal(px(5.0)),
+                    width: px(150.0),
+                    height: percent(100),
+                    overflow: Overflow::clip(),
+                    justify_content: JustifyContent::Start,
+                    align_items: AlignItems::Center,
+                }
+                :label("installed version")
+            ),
+            :vertical_serparator,
+            (
+                Node {
+                    margin: UiRect::horizontal(px(5.0)),
+                    width: px(250.0),
+                    height: percent(100),
+                    overflow: Overflow::clip(),
+                    justify_content: JustifyContent::Start,
+                    align_items: AlignItems::Center,
+                }
+                :label("latest version")
+            ),
+            :vertical_serparator
+        ]
+    });
+
     for row in installed {
         let row = row.clone();
         ui_root.queue_spawn_related_scenes::<Children>(bsn_list! {(

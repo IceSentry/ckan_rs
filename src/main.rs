@@ -350,19 +350,20 @@ pub fn label_bold(text: impl Into<String>) -> impl Scene {
 
 fn spawn_rows(event: On<Add, TableRows>, mut commands: Commands, q: Query<&TableRows>) {
     let mut content = commands.entity(event.event_target());
+    let mut rows = vec![];
     for row in &q.get(event.event_target()).unwrap().0 {
-        let row = row.clone();
-        content.queue_spawn_related_scenes::<Children>(bsn_list! {(
+        rows.push(bsn! {
             Node {
                 width: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
             }
             Children [
-                :module_row(row),
+                :module_row(row.clone()),
                 :horizontal_serparator
             ]
-        )});
+        });
     }
+    content.queue_spawn_related_scenes::<Children>(rows);
 }
 
 fn module_row(row: ModuleRow) -> impl Scene {

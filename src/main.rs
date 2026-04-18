@@ -5,7 +5,7 @@ use bevy::{
         FeathersPlugins,
         dark_theme::create_dark_theme,
         display::label,
-        theme::{ThemeBackgroundColor, ThemedText, UiTheme},
+        theme::{ThemeBackgroundColor, ThemeFontColor, ThemedText, UiTheme},
         tokens,
     },
     input::mouse::{MouseScrollUnit, MouseWheel},
@@ -67,7 +67,8 @@ fn main() -> anyhow::Result<()> {
         .add_systems(Update, send_scroll_events)
         .add_systems(Update, update_scroll_indicator)
         .add_observer(on_scroll_handler)
-        .add_observer(on_thumb_drag);
+        .add_observer(on_thumb_drag)
+        .add_observer(spawn_rows);
 
     // Set all schedules to single threaded to reduce cpu usage
     app.edit_schedule(First, |s| {
@@ -120,7 +121,7 @@ fn main() -> anyhow::Result<()> {
 const LINE_HEIGHT: f32 = 22.;
 
 fn setup(world: &mut World) -> Result {
-    world.spawn_scene_list(bsn_list![Camera2d, layout_root()])?;
+    world.spawn_scene_list(bsn_list![Camera2d, ui_root()])?;
     Ok(())
 }
 
@@ -141,10 +142,10 @@ struct ModuleRow {
 fn startup_tasks(mut commands: Commands) {
     let pool = AsyncComputeTaskPool::get();
     let task = pool.spawn(async move {
-        info!("ckan scan");
-        let _ = ckan::run_command(&["scan"]);
-        info!("ckan update");
-        let _ = ckan::run_command(&["update"]);
+        // info!("ckan scan");
+        // let _ = ckan::run_command(&["scan"]);
+        // info!("ckan update");
+        // let _ = ckan::run_command(&["update"]);
 
         let instance_path = ckan::default_instance_path().unwrap();
         info!("Getting ckan registry");
@@ -196,33 +197,175 @@ fn handle_tasks(
         };
         commands.entity(entity).remove::<GetList>();
 
+        // Despawn everything
         let mut ui_root = commands.entity(*ui_root);
         ui_root.despawn_children();
-        spawn_installed_table(&mut ui_root, &result.list);
+
+        ui_root.queue_spawn_related_scenes::<Children>(spawn_table(result.list.clone()));
     }
 }
 
-fn vertical_serparator() -> impl Scene {
-    bsn!(
+fn ui_root() -> impl Scene {
+    bsn! {
+        UiRoot
         Node {
-            width: px(1),
-            height: percent(100),
-        }
-        ThemeBackgroundColor(tokens::MENU_BORDER)
-    )
-}
-
-fn horizontal_serparator() -> impl Scene {
-    bsn!(
-        Node {
-            height: px(1),
             width: percent(100),
+            height: percent(100),
+            flex_direction: FlexDirection::Row,
         }
-        ThemeBackgroundColor(tokens::MENU_BORDER)
-    )
+        ThemeBackgroundColor(tokens::WINDOW_BG)
+        Children[(
+            Node {
+                flex_grow: 1.,
+                height: percent(100),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+            }
+            Children[(Text::new("Loading...") ThemedText)]
+        )]
+    }
 }
 
-fn installed_row(row: ModuleRow) -> impl Scene {
+fn spawn_table(rows: Vec<ModuleRow>) -> impl SceneList {
+    bsn_list! {
+        Node {
+            flex_direction: FlexDirection::Column,
+            flex_grow: 1.,
+        }
+        Children[
+            // Header
+            (
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    width: Val::Percent(100.),
+                }
+                Children[
+                    (
+                        Node {
+                            height: Val::Px(LINE_HEIGHT),
+                            width: Val::Percent(100.),
+                        }
+                        :table_header
+                    )
+                    :horizontal_serparator,
+                ]
+            ),
+            // Row + Scroll
+            (
+                Node {
+                    flex_grow: 1.,
+                    flex_direction: FlexDirection::Row,
+                    min_height: Val::Px(0.),
+                }
+                Children[
+                    (
+                        TableRows::new(rows.clone())
+                        Node {
+                            flex_grow: 1.,
+                            height: Val::Percent(100.),
+                            flex_direction: FlexDirection::Column,
+                            overflow: Overflow::scroll_y(),
+                        }
+                    ),
+                    :table_scrollbar
+                ]
+            )
+        ]
+    }
+}
+
+const COL_SIZE: [f32; 4] = [120.0, 400.0, 220.0, 220.0];
+
+fn table_header() -> impl Scene {
+    bsn! {
+        Children[
+            (
+                Node {
+                    margin: UiRect::horizontal(px(5.0)),
+                    width: px(COL_SIZE[0]),
+                    height: percent(100),
+                    overflow: Overflow::clip(),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                }
+                :label_bold("Installed")
+            ),
+            :vertical_serparator,
+            (
+                Node {
+                    margin: UiRect::horizontal(px(5.0)),
+                    width: px(COL_SIZE[1]),
+                    height: percent(100),
+                    overflow: Overflow::clip(),
+                    justify_content: JustifyContent::Start,
+                    align_items: AlignItems::Center,
+                }
+                :label_bold("Name")
+            ),
+            :vertical_serparator,
+            (
+                Node {
+                    margin: UiRect::horizontal(px(5.0)),
+                    width: px(COL_SIZE[2]),
+                    height: percent(100),
+                    overflow: Overflow::clip(),
+                    justify_content: JustifyContent::Start,
+                    align_items: AlignItems::Center,
+                }
+                :label_bold("Installed Version")
+            ),
+            :vertical_serparator,
+            (
+                Node {
+                    margin: UiRect::horizontal(px(5.0)),
+                    width: px(COL_SIZE[3]),
+                    height: percent(100),
+                    overflow: Overflow::clip(),
+                    justify_content: JustifyContent::Start,
+                    align_items: AlignItems::Center,
+                }
+                :label_bold("Latest Version")
+            ),
+            :vertical_serparator
+        ]
+    }
+}
+
+pub fn label_bold(text: impl Into<String>) -> impl Scene {
+    let text = Text::new(text.into());
+    bsn! {
+        Node
+        ThemeFontColor(tokens::TEXT_MAIN)
+        // InheritableFont {
+        //     font: fonts::REGULAR,
+        //     font_size: size::MEDIUM_FONT,
+        //     weight: FontWeight::EXTRA_BOLD,
+        // }
+        Children [
+            template_value(text)
+            ThemedText
+        ]
+    }
+}
+
+fn spawn_rows(event: On<Add, TableRows>, mut commands: Commands, q: Query<&TableRows>) {
+    let mut content = commands.entity(event.event_target());
+    for row in &q.get(event.event_target()).unwrap().0 {
+        let row = row.clone();
+        content.queue_spawn_related_scenes::<Children>(bsn_list! {(
+            Node {
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+            }
+            Children [
+                :module_row(row),
+                :horizontal_serparator
+            ]
+        )});
+    }
+}
+
+fn module_row(row: ModuleRow) -> impl Scene {
     let bg_color = if row
         .installed_version
         .as_ref()
@@ -253,7 +396,7 @@ fn installed_row(row: ModuleRow) -> impl Scene {
             (
                 Node {
                     margin: UiRect::horizontal(px(5.0)),
-                    width: px(20.0),
+                    width: px(COL_SIZE[0]),
                     height: percent(100),
                     overflow: Overflow::clip(),
                     justify_content: JustifyContent::Center,
@@ -265,7 +408,7 @@ fn installed_row(row: ModuleRow) -> impl Scene {
             (
                 Node {
                     margin: UiRect::horizontal(px(5.0)),
-                    width: px(400.0),
+                    width: px(COL_SIZE[1]),
                     height: percent(100),
                     overflow: Overflow::clip(),
                     justify_content: JustifyContent::Start,
@@ -277,7 +420,7 @@ fn installed_row(row: ModuleRow) -> impl Scene {
             (
                 Node {
                     margin: UiRect::horizontal(px(5.0)),
-                    width: px(150.0),
+                    width: px(COL_SIZE[2]),
                     height: percent(100),
                     overflow: Overflow::clip(),
                     justify_content: JustifyContent::Start,
@@ -289,7 +432,7 @@ fn installed_row(row: ModuleRow) -> impl Scene {
             (
                 Node {
                     margin: UiRect::horizontal(px(5.0)),
-                    width: px(250.0),
+                    width: px(COL_SIZE[3]),
                     height: percent(100),
                     overflow: Overflow::clip(),
                     justify_content: JustifyContent::Start,
@@ -302,129 +445,47 @@ fn installed_row(row: ModuleRow) -> impl Scene {
     }
 }
 
-fn spawn_installed_table(ui_root: &mut EntityCommands, installed: &[ModuleRow]) {
-    ui_root.queue_spawn_related_scenes::<Children>(bsn_list! {
+fn vertical_serparator() -> impl Scene {
+    bsn!(
         Node {
-            height: px(LINE_HEIGHT),
+            width: px(1),
+            height: percent(100),
+        }
+        ThemeBackgroundColor(tokens::MENU_BORDER)
+    )
+}
+
+fn horizontal_serparator() -> impl Scene {
+    bsn!(
+        Node {
+            height: px(1),
             width: percent(100),
         }
-        Children [
-            (
-                Node {
-                    margin: UiRect::horizontal(px(5.0)),
-                    width: px(20.0),
-                    height: percent(100),
-                    overflow: Overflow::clip(),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                }
-                :label("Installed")
-            ),
-            :vertical_serparator,
-            (
-                Node {
-                    margin: UiRect::horizontal(px(5.0)),
-                    width: px(400.0),
-                    height: percent(100),
-                    overflow: Overflow::clip(),
-                    justify_content: JustifyContent::Start,
-                    align_items: AlignItems::Center,
-                }
-                :label("Name")
-            ),
-            :vertical_serparator,
-            (
-                Node {
-                    margin: UiRect::horizontal(px(5.0)),
-                    width: px(150.0),
-                    height: percent(100),
-                    overflow: Overflow::clip(),
-                    justify_content: JustifyContent::Start,
-                    align_items: AlignItems::Center,
-                }
-                :label("installed version")
-            ),
-            :vertical_serparator,
-            (
-                Node {
-                    margin: UiRect::horizontal(px(5.0)),
-                    width: px(250.0),
-                    height: percent(100),
-                    overflow: Overflow::clip(),
-                    justify_content: JustifyContent::Start,
-                    align_items: AlignItems::Center,
-                }
-                :label("latest version")
-            ),
-            :vertical_serparator
-        ]
-    });
-
-    for row in installed {
-        let row = row.clone();
-        ui_root.queue_spawn_related_scenes::<Children>(bsn_list! {(
-            Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-            }
-            Children [
-                :installed_row(row),
-                :horizontal_serparator
-            ]
-        )});
-    }
+        ThemeBackgroundColor(tokens::MENU_BORDER)
+    )
 }
 
 #[derive(Component, Default, Clone, Copy)]
 struct UiRoot;
 
+#[derive(Component, Default, Clone)]
+struct TableRows(Vec<ModuleRow>);
+
+impl TableRows {
+    fn new(list: Vec<ModuleRow>) -> Self {
+        Self(list)
+    }
+}
+
 #[derive(Component, Default, Clone, Copy)]
-struct ScrollbarTrack;
+struct TableScrollbar;
 
 #[derive(Component, Default, Clone, Copy)]
 struct ScrollThumb;
 
-fn layout_root() -> impl Scene {
+fn table_scrollbar() -> impl Scene {
     bsn! {
-        Node {
-            width: percent(100),
-            height: percent(100),
-            flex_direction: FlexDirection::Row,
-        }
-        ThemeBackgroundColor(tokens::WINDOW_BG)
-        Children [
-            :ui_root,
-            :scrollbar_track
-        ]
-    }
-}
-
-fn ui_root() -> impl Scene {
-    bsn! {
-        UiRoot
-        Node {
-            flex_grow: 1.,
-            height: percent(100),
-            align_items: AlignItems::FlexStart,
-            justify_content: JustifyContent::FlexStart,
-            flex_direction: FlexDirection::Column,
-            overflow: Overflow::scroll_y(),
-        }
-        Children[(
-            Node {
-                width: percent(100),
-                height: percent(100),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-            }
-            Children[(Text::new("Loading...") ThemedText)]
-        )]
-    }
-}
-
-fn scrollbar_track() -> impl Scene {
-    bsn! {
-        ScrollbarTrack
+        TableScrollbar
         Node {
             width: px(8),
             height: percent(100),
@@ -444,11 +505,14 @@ fn scrollbar_track() -> impl Scene {
 }
 
 fn update_scroll_indicator(
-    ui_root: Single<(&ScrollPosition, &ComputedNode), With<UiRoot>>,
-    track: Single<&ComputedNode, With<ScrollbarTrack>>,
-    mut thumb: Single<&mut Node, With<ScrollThumb>>,
+    content_pane: Option<Single<(&ScrollPosition, &ComputedNode), With<TableRows>>>,
+    track: Option<Single<&ComputedNode, With<TableScrollbar>>>,
+    thumb: Option<Single<&mut Node, With<ScrollThumb>>>,
 ) {
-    let (scroll_pos, computed) = *ui_root;
+    let (Some(content_pane), Some(track), Some(mut thumb)) = (content_pane, track, thumb) else {
+        return;
+    };
+    let (scroll_pos, computed) = *content_pane;
     let scale = computed.inverse_scale_factor();
     let viewport_h = computed.size().y * scale;
     let content_h = computed.content_size().y * scale;
@@ -470,13 +534,16 @@ fn update_scroll_indicator(
 fn on_thumb_drag(
     drag: On<Pointer<Drag>>,
     thumb_query: Query<(), With<ScrollThumb>>,
-    ui_root: Single<(&mut ScrollPosition, &ComputedNode), With<UiRoot>>,
-    track: Single<&ComputedNode, With<ScrollbarTrack>>,
+    content_pane: Option<Single<(&mut ScrollPosition, &ComputedNode), With<TableRows>>>,
+    track: Option<Single<&ComputedNode, With<TableScrollbar>>>,
 ) {
     if thumb_query.get(drag.event_target()).is_err() {
         return;
     }
-    let (mut scroll_pos, computed) = ui_root.into_inner();
+    let (Some(content_pane), Some(track)) = (content_pane, track) else {
+        return;
+    };
+    let (mut scroll_pos, computed) = content_pane.into_inner();
     let scale = computed.inverse_scale_factor();
     let viewport_h = computed.size().y * scale;
     let content_h = computed.content_size().y * scale;

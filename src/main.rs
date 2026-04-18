@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 use argh::FromArgs;
 use bevy::{
     ecs::schedule::SingleThreadedExecutor,
@@ -68,7 +70,7 @@ fn main() -> anyhow::Result<()> {
         .add_systems(Update, update_scroll_indicator)
         .add_observer(on_scroll_handler)
         .add_observer(on_thumb_drag)
-        .add_observer(spawn_rows);
+        .add_observer(on_spawn_scene_list);
 
     // Set all schedules to single threaded to reduce cpu usage
     app.edit_schedule(First, |s| {
@@ -259,7 +261,20 @@ fn spawn_table(rows: Vec<ModuleRow>) -> impl SceneList {
                 }
                 Children[
                     (
-                        TableRows::new(rows.clone())
+                        ContentPane
+                        SpawnSceneList::new(rows.iter().map(|row| {
+                            let row = row.clone();
+                            bsn! {
+                                Node {
+                                    width: Val::Percent(100.0),
+                                    flex_direction: FlexDirection::Column,
+                                }
+                                Children [
+                                    :module_row(row),
+                                    :horizontal_serparator
+                                ]
+                            }
+                        }).collect::<Vec<_>>())
                         Node {
                             flex_grow: 1.,
                             height: Val::Percent(100.),
@@ -346,24 +361,6 @@ pub fn label_bold(text: impl Into<String>) -> impl Scene {
             ThemedText
         ]
     }
-}
-
-fn spawn_rows(event: On<Add, TableRows>, mut commands: Commands, q: Query<&TableRows>) {
-    let mut content = commands.entity(event.event_target());
-    let mut rows = vec![];
-    for row in &q.get(event.event_target()).unwrap().0 {
-        rows.push(bsn! {
-            Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-            }
-            Children [
-                :module_row(row.clone()),
-                :horizontal_serparator
-            ]
-        });
-    }
-    content.queue_spawn_related_scenes::<Children>(rows);
 }
 
 fn module_row(row: ModuleRow) -> impl Scene {
@@ -469,13 +466,27 @@ fn horizontal_serparator() -> impl Scene {
 #[derive(Component, Default, Clone, Copy)]
 struct UiRoot;
 
-#[derive(Component, Default, Clone)]
-struct TableRows(Vec<ModuleRow>);
+#[derive(Component, Default, Clone, Copy)]
+struct ContentPane;
 
-impl TableRows {
-    fn new(list: Vec<ModuleRow>) -> Self {
-        Self(list)
+#[derive(Component, Clone, Default)]
+struct SpawnSceneList(Arc<Mutex<Option<Box<dyn SceneList + Send + Sync + 'static>>>>);
+
+impl SpawnSceneList {
+    fn new(scene_list: impl SceneList + Send + Sync + 'static) -> Self {
+        Self(Arc::new(Mutex::new(Some(Box::new(scene_list)))))
     }
+}
+
+fn on_spawn_scene_list(trigger: On<Add, SpawnSceneList>, q: Query<&SpawnSceneList>, mut commands: Commands) {
+    let entity = trigger.event_target();
+    let Ok(spawn) = q.get(entity) else { return };
+    let scene_list = spawn.0.lock().unwrap().take();
+    if let Some(scene_list) = scene_list {
+        let scene_list: Box<dyn SceneList> = scene_list;
+        commands.entity(entity).queue_spawn_related_scenes::<Children>(scene_list);
+    }
+    commands.entity(entity).remove::<SpawnSceneList>();
 }
 
 #[derive(Component, Default, Clone, Copy)]
@@ -506,7 +517,7 @@ fn table_scrollbar() -> impl Scene {
 }
 
 fn update_scroll_indicator(
-    content_pane: Option<Single<(&ScrollPosition, &ComputedNode), With<TableRows>>>,
+    content_pane: Option<Single<(&ScrollPosition, &ComputedNode), With<ContentPane>>>,
     track: Option<Single<&ComputedNode, With<TableScrollbar>>>,
     thumb: Option<Single<&mut Node, With<ScrollThumb>>>,
 ) {
@@ -535,7 +546,7 @@ fn update_scroll_indicator(
 fn on_thumb_drag(
     drag: On<Pointer<Drag>>,
     thumb_query: Query<(), With<ScrollThumb>>,
-    content_pane: Option<Single<(&mut ScrollPosition, &ComputedNode), With<TableRows>>>,
+    content_pane: Option<Single<(&mut ScrollPosition, &ComputedNode), With<ContentPane>>>,
     track: Option<Single<&ComputedNode, With<TableScrollbar>>>,
 ) {
     if thumb_query.get(drag.event_target()).is_err() {

@@ -69,8 +69,7 @@ fn main() -> anyhow::Result<()> {
         .add_systems(Update, send_scroll_events)
         .add_systems(Update, update_scroll_indicator)
         .add_observer(on_scroll_handler)
-        .add_observer(on_thumb_drag)
-        .add_observer(on_spawn_scene_list);
+        .add_observer(on_thumb_drag);
 
     // Set all schedules to single threaded to reduce cpu usage
     app.edit_schedule(First, |s| {
@@ -144,10 +143,10 @@ struct ModuleRow {
 fn startup_tasks(mut commands: Commands) {
     let pool = AsyncComputeTaskPool::get();
     let task = pool.spawn(async move {
-        // info!("ckan scan");
-        // let _ = ckan::run_command(&["scan"]);
-        // info!("ckan update");
-        // let _ = ckan::run_command(&["update"]);
+        info!("ckan scan");
+        let _ = ckan::run_command(&["scan"]);
+        info!("ckan update");
+        let _ = ckan::run_command(&["update"]);
 
         let instance_path = ckan::default_instance_path().unwrap();
         info!("Getting ckan registry");
@@ -229,6 +228,22 @@ fn ui_root() -> impl Scene {
 }
 
 fn spawn_table(rows: Vec<ModuleRow>) -> impl SceneList {
+    let rows = rows
+        .iter()
+        .map(|row| {
+            let row = row.clone();
+            bsn! {
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Column,
+                }
+                Children [
+                    :module_row(row),
+                    :horizontal_serparator
+                ]
+            }
+        })
+        .collect::<Vec<_>>();
     bsn_list! {
         Node {
             flex_direction: FlexDirection::Column,
@@ -262,25 +277,13 @@ fn spawn_table(rows: Vec<ModuleRow>) -> impl SceneList {
                 Children[
                     (
                         ContentPane
-                        SpawnSceneList::new(rows.iter().map(|row| {
-                            let row = row.clone();
-                            bsn! {
-                                Node {
-                                    width: Val::Percent(100.0),
-                                    flex_direction: FlexDirection::Column,
-                                }
-                                Children [
-                                    :module_row(row),
-                                    :horizontal_serparator
-                                ]
-                            }
-                        }).collect::<Vec<_>>())
                         Node {
                             flex_grow: 1.,
                             height: Val::Percent(100.),
                             flex_direction: FlexDirection::Column,
                             overflow: Overflow::scroll_y(),
                         }
+                        Children[{ rows }]
                     ),
                     :table_scrollbar
                 ]
@@ -468,26 +471,6 @@ struct UiRoot;
 
 #[derive(Component, Default, Clone, Copy)]
 struct ContentPane;
-
-#[derive(Component, Clone, Default)]
-struct SpawnSceneList(Arc<Mutex<Option<Box<dyn SceneList + Send + Sync + 'static>>>>);
-
-impl SpawnSceneList {
-    fn new(scene_list: impl SceneList + Send + Sync + 'static) -> Self {
-        Self(Arc::new(Mutex::new(Some(Box::new(scene_list)))))
-    }
-}
-
-fn on_spawn_scene_list(trigger: On<Add, SpawnSceneList>, q: Query<&SpawnSceneList>, mut commands: Commands) {
-    let entity = trigger.event_target();
-    let Ok(spawn) = q.get(entity) else { return };
-    let scene_list = spawn.0.lock().unwrap().take();
-    if let Some(scene_list) = scene_list {
-        let scene_list: Box<dyn SceneList> = scene_list;
-        commands.entity(entity).queue_spawn_related_scenes::<Children>(scene_list);
-    }
-    commands.entity(entity).remove::<SpawnSceneList>();
-}
 
 #[derive(Component, Default, Clone, Copy)]
 struct TableScrollbar;

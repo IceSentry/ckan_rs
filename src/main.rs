@@ -7,7 +7,7 @@ use bevy::{
         FeathersPlugins,
         dark_theme::create_dark_theme,
         display::label,
-        theme::{ThemeBackgroundColor, ThemeFontColor, ThemedText, UiTheme},
+        theme::{ThemeBackgroundColor, ThemeTextColor, ThemedText, UiTheme},
         tokens,
     },
     input::mouse::{MouseScrollUnit, MouseWheel},
@@ -353,7 +353,7 @@ pub fn label_bold(text: impl Into<String>) -> impl Scene {
     let text = Text::new(text.into());
     bsn! {
         Node
-        ThemeFontColor(tokens::TEXT_MAIN)
+        ThemeTextColor(tokens::TEXT_MAIN)
         // InheritableFont {
         //     font: fonts::REGULAR,
         //     font_size: size::MEDIUM_FONT,

@@ -19,6 +19,29 @@ fn setup(mut commands: Commands) {
 }
 
 fn ui_root() -> impl Scene {
+    let mut rows = vec![];
+
+    for i in 0..100 {
+        let row = bsn! {
+            // Need to use Children because tr is a bsn_list
+            Node Children[{
+                tr(bsn_list! {
+                    Node Children[
+                        {td(bsn_list!{
+                            :label(format!("{i}"))
+                        })},
+                        {td(bsn_list!{
+                            :label("test 1")
+                        })},
+                        {td(bsn_list!{
+                            :label("test 2")
+                        })}
+                    ]
+                })}
+            ]
+        };
+        rows.push(row);
+    }
     bsn! {
         Node {
             width: percent(100),
@@ -40,29 +63,33 @@ fn ui_root() -> impl Scene {
                 })}
             }),
             :tbody(bsn_list!{
-                {tr(bsn_list!{
-                    {td(bsn_list!{
-                        :label("A")
-                    })},
-                    {td(bsn_list!{
-                        :label("B")
-                    })},
-                    {td(bsn_list!{
-                        :label("CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC")
-                    })},
-                })},
-                {tr(bsn_list!{
-                    {td(bsn_list!{
-                        :label("C")
-                    })},
-                    {td(bsn_list!{
-                        :label("D")
-                    })},
-                })},
+                {rows}
             })
+            // :tbody(bsn_list!{
+            //     {tr(bsn_list!{
+            //         {td(bsn_list!{
+            //             :label("A")
+            //         })},
+            //         {td(bsn_list!{
+            //             :label("B")
+            //         })},
+            //         {td(bsn_list!{
+            //             :label("CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC")
+            //         })},
+            //     })},
+            //     {tr(bsn_list!{
+            //         {td(bsn_list!{
+            //             :label("C")
+            //         })},
+            //         {td(bsn_list!{
+            //             :label("D")
+            //         })},
+            //     })},
+            // })
         })
     }
 }
+
 #[derive(Component, Default, Clone)]
 struct Table;
 fn table(content: impl SceneList) -> impl Scene {
@@ -155,69 +182,67 @@ fn horizontal_serparator() -> impl Scene {
     )
 }
 
+fn find_descendants(
+    entity: Entity,
+    children_q: &Query<&Children>,
+    predicate: &impl Fn(Entity) -> bool,
+) -> Vec<Entity> {
+    let Ok(children) = children_q.get(entity) else {
+        return vec![];
+    };
+    let mut result = vec![];
+    for child in children.iter() {
+        if predicate(child) {
+            result.push(child);
+        } else {
+            result.extend(find_descendants(child, children_q, predicate));
+        }
+    }
+    result
+}
+
 fn on_table_spawned(
-    tables: Query<&Children, Added<Table>>,
-    children_q: Query<&Children>,
-    header_q: Query<(), With<TableHeader>>,
-    body_q: Query<(), With<TableBody>>,
-    row_q: Query<(), With<TableRow>>,
-    td_computed_q: Query<&ComputedNode, With<TableData>>,
-    mut td_node_q: Query<&mut Node, With<TableData>>,
+    tables: Query<Entity, Added<Table>>,
+    children: Query<&Children>,
+    table_headers: Query<(), With<TableHeader>>,
+    is_body: Query<(), With<TableBody>>,
+    is_row: Query<(), With<TableRow>>,
+    td_computed_node: Query<&ComputedNode, With<TableData>>,
+    mut td_node: Query<&mut Node, With<TableData>>,
 ) {
-    for table_children in &tables {
+    for table in &tables {
         info!("table spawned");
 
         // --- collect header TD widths in order ---
+        let headers = find_descendants(table, &children, &|e| table_headers.get(e).is_ok());
+        info!("headers found: {}", headers.len());
+
         let mut header_widths: Vec<f32> = Vec::new();
-        for table_child in table_children.iter() {
-            if header_q.get(table_child).is_err() {
-                continue;
-            }
-            let Ok(header_children) = children_q.get(table_child) else {
-                continue;
-            };
-            for header_child in header_children.iter() {
-                if row_q.get(header_child).is_err() {
-                    continue;
-                }
-                let Ok(row_children) = children_q.get(header_child) else {
-                    continue;
-                };
-                for row_child in row_children.iter() {
-                    if let Ok(computed) = td_computed_q.get(row_child) {
-                        let width = computed.size().x;
-                        info!("header td [{row_child}] width: {:?}", width);
-                        header_widths.push(width);
-                    }
+        for header in headers {
+            let rows = find_descendants(header, &children, &|e| is_row.get(e).is_ok());
+            info!("header rows found: {}", rows.len());
+            for row in rows {
+                let tds = find_descendants(row, &children, &|e| td_computed_node.get(e).is_ok());
+                for td in tds {
+                    let width = td_computed_node.get(td).unwrap().size().x;
+                    info!("header td [{td}] width: {width}");
+                    header_widths.push(width);
                 }
             }
         }
         info!("header widths: {:?}", header_widths);
 
         // --- apply header widths to each body row's TDs in order ---
-        for table_child in table_children.iter() {
-            if body_q.get(table_child).is_err() {
-                continue;
-            }
-            let Ok(body_children) = children_q.get(table_child) else {
-                continue;
-            };
-            for body_child in body_children.iter() {
-                if row_q.get(body_child).is_err() {
-                    continue;
-                }
-                let Ok(row_children) = children_q.get(body_child) else {
-                    continue;
-                };
-                let mut col = 0;
-                for row_child in row_children.iter() {
-                    if let Ok(mut node) = td_node_q.get_mut(row_child) {
-                        if let Some(&width) = header_widths.get(col) {
-                            info!("setting body td [{row_child}] col {col} width to {width}");
-                            node.width = Val::Px(width);
-                        }
-                        col += 1;
-                    }
+        let body = find_descendants(table, &children, &|e| is_body.get(e).is_ok());
+        assert!(body.len() == 1, "Unexpectedly found multiple table body");
+
+        let rows = find_descendants(body[0], &children, &|e| is_row.get(e).is_ok());
+        for row in rows {
+            let tds = find_descendants(row, &children, &|e| td_node.get(e).is_ok());
+            for (col, td) in tds.into_iter().enumerate() {
+                if let Some(&width) = header_widths.get(col) {
+                    info!("setting body td [{td}] col {col} width to {width}");
+                    td_node.get_mut(td).unwrap().width = Val::Px(width);
                 }
             }
         }

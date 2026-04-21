@@ -25,42 +25,42 @@ fn ui_root() -> impl Scene {
             height: percent(100),
         }
         ThemeBackgroundColor(tokens::WINDOW_BG)
-            :table(bsn_list!{
-                :thead(bsn_list!{
-                    {tr(bsn_list!{
-                        {td(bsn_list!{
-                            :label("AAA"),
-                        })},
-                        {td(bsn_list!{
-                            :label("BBbbbbbbbbbbbbbbbbbBBBBBBBBB"),
-                        })},
-                        {td(bsn_list!{
-                            :label("CCCCCCCCCCCC"),
-                        })},
-                    })}
-                }),
-                :tbody(bsn_list!{
-                    {tr(bsn_list!{
-                        {td(bsn_list!{
-                            :label("A")
-                        })},
-                        {td(bsn_list!{
-                            :label("B")
-                        })},
-                        {td(bsn_list!{
-                            :label("CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC")
-                        })},
+        :table(bsn_list!{
+            :thead(bsn_list!{
+                {tr(bsn_list!{
+                    {td(bsn_list!{
+                        :label("AAA"),
                     })},
-                    {tr(bsn_list!{
-                        {td(bsn_list!{
-                            :label("C")
-                        })},
-                        {td(bsn_list!{
-                            :label("D")
-                        })},
+                    {td(bsn_list!{
+                        :label("BBbbbbbbbbbbbbbbbbbBBBBBBBBB"),
                     })},
-                })
+                    {td(bsn_list!{
+                        :label("CCCCCCCCCCCC"),
+                    })},
+                })}
+            }),
+            :tbody(bsn_list!{
+                {tr(bsn_list!{
+                    {td(bsn_list!{
+                        :label("A")
+                    })},
+                    {td(bsn_list!{
+                        :label("B")
+                    })},
+                    {td(bsn_list!{
+                        :label("CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC")
+                    })},
+                })},
+                {tr(bsn_list!{
+                    {td(bsn_list!{
+                        :label("C")
+                    })},
+                    {td(bsn_list!{
+                        :label("D")
+                    })},
+                })},
             })
+        })
     }
 }
 #[derive(Component, Default, Clone)]

@@ -29,7 +29,7 @@ fn setup(mut commands: Commands) {
 fn ui_root() -> impl Scene {
     let mut rows = vec![];
 
-    for i in 0..42 {
+    for i in 0..420 {
         rows.push(bsn! {
             tr(bsn_list! {
                 td(bsn!{
@@ -280,18 +280,27 @@ fn on_table_spawned(
     }
 }
 
-const SCROLL_SPEED: f32 = 42.;
-
 fn send_scroll_events(
     mut mouse_wheel_reader: MessageReader<MouseWheel>,
     hover_map: Res<HoverMap>,
     mut commands: Commands,
+    content_query: Query<&ComputedNode, With<TableBodyContent>>,
+    rows: Query<(), With<TableRow>>,
 ) {
+    let scroll_speed = content_query.single().map_or(1.0, |node| {
+        let row_count = rows.iter().count();
+        if row_count > 0 {
+            node.content_size().y * node.inverse_scale_factor() / row_count as f32
+        } else {
+            1.
+        }
+    });
+
     for mouse_wheel in mouse_wheel_reader.read() {
         let mut delta = -Vec2::new(mouse_wheel.x, mouse_wheel.y);
 
         if mouse_wheel.unit == MouseScrollUnit::Line {
-            delta *= SCROLL_SPEED;
+            delta *= scroll_speed;
         }
 
         for pointer_map in hover_map.values() {
@@ -326,7 +335,9 @@ fn drag_thumb(
     scrollbar_query: Query<&ComputedNode, With<Scrollbar>>,
     mut content_query: Query<(&mut ScrollPosition, &ComputedNode), With<TableBodyContent>>,
 ) {
-    let Ok(window) = windows.single() else { return; };
+    let Ok(window) = windows.single() else {
+        return;
+    };
 
     if mouse_buttons.just_released(MouseButton::Left) {
         drag.active = false;
@@ -359,8 +370,12 @@ fn drag_thumb(
         return;
     }
 
-    let Ok(track_node) = scrollbar_query.single() else { return; };
-    let Ok((mut scroll_pos, content_node)) = content_query.single_mut() else { return; };
+    let Ok(track_node) = scrollbar_query.single() else {
+        return;
+    };
+    let Ok((mut scroll_pos, content_node)) = content_query.single_mut() else {
+        return;
+    };
 
     let viewport_h = content_node.size().y;
     let content_h = content_node.content_size().y;

@@ -15,11 +15,7 @@ fn main() {
         .add_systems(Update, send_scroll_events)
         .add_systems(
             PostUpdate,
-            (
-                on_table_spawned,
-                // update_scrollbar,
-            )
-                .after(UiSystems::PostLayout),
+            (on_table_spawned, update_scrollbar).after(UiSystems::PostLayout),
         )
         .add_observer(on_scroll_handler)
         .run();
@@ -125,13 +121,32 @@ fn tbody(content: impl SceneList) -> impl Scene {
     }
 }
 
+#[derive(Component, Default, Clone)]
+struct Scrollbar;
+
+#[derive(Component, Default, Clone)]
+struct ScrollbarThumb;
+
 fn scrollbar_track() -> impl Scene {
     bsn! {
+        Scrollbar
         Node {
             width: px(12),
             height: percent(100),
         }
         ThemeBackgroundColor(tokens::SCROLLBAR_BG)
+        Children[
+            (
+                ScrollbarThumb
+                Node {
+                    position_type: PositionType::Absolute,
+                    width: percent(100),
+                    height: percent(0),
+                    top: px(0),
+                }
+                ThemeBackgroundColor(tokens::SCROLLBAR_THUMB)
+            )
+        ]
     }
 }
 
@@ -281,6 +296,41 @@ struct Scroll {
     entity: Entity,
     /// Scroll delta in logical coordinates.
     delta: Vec2,
+}
+
+fn update_scrollbar(
+    body_contents: Query<(&ScrollPosition, &ComputedNode), With<TableBodyContent>>,
+    scrollbar: Query<&ComputedNode, With<Scrollbar>>,
+    mut thumb: Query<&mut Node, With<ScrollbarThumb>>,
+) {
+    let Ok((scroll_pos, content_node)) = body_contents.single() else {
+        return;
+    };
+    let Ok(track_node) = scrollbar.single() else {
+        return;
+    };
+    let Ok(mut thumb_node) = thumb.single_mut() else {
+        return;
+    };
+
+    let viewport_h = content_node.size().y;
+    let content_h = content_node.content_size().y;
+    let track_h = track_node.size().y;
+
+    if content_h <= viewport_h || track_h <= 0. {
+        thumb_node.height = Val::Percent(0.);
+        return;
+    }
+
+    let scale = content_node.inverse_scale_factor();
+
+    let thumb_h = (viewport_h / content_h * track_h).max(20.0);
+    let max_scroll = (content_h - viewport_h) * scale;
+    let scroll_ratio = (scroll_pos.y / max_scroll).clamp(0., 1.);
+    let thumb_top = (track_h - thumb_h) * scroll_ratio;
+
+    thumb_node.height = Val::Px(thumb_h * scale);
+    thumb_node.top = Val::Px(thumb_top * scale);
 }
 
 // This only handles scrolling vertically

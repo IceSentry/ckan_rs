@@ -11,8 +11,9 @@ fn main() {
     App::new()
         .add_plugins((DefaultPlugins, FeathersPlugins))
         .insert_resource(UiTheme(create_dark_theme()))
+        .init_resource::<ThumbDrag>()
         .add_systems(Startup, setup)
-        .add_systems(Update, send_scroll_events)
+        .add_systems(Update, (send_scroll_events, drag_thumb))
         .add_systems(
             PostUpdate,
             (on_table_spawned, update_scrollbar).after(UiSystems::PostLayout),
@@ -308,6 +309,78 @@ struct Scroll {
     entity: Entity,
     /// Scroll delta in logical coordinates.
     delta: Vec2,
+}
+
+#[derive(Resource, Default)]
+struct ThumbDrag {
+    active: bool,
+    last_mouse_y: f32,
+}
+
+fn drag_thumb(
+    mut drag: ResMut<ThumbDrag>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    hover_map: Res<HoverMap>,
+    windows: Query<&Window>,
+    thumb_query: Query<(), With<ScrollbarThumb>>,
+    scrollbar_query: Query<&ComputedNode, With<Scrollbar>>,
+    mut content_query: Query<(&mut ScrollPosition, &ComputedNode), With<TableBodyContent>>,
+) {
+    let Ok(window) = windows.single() else { return; };
+
+    if mouse_buttons.just_released(MouseButton::Left) {
+        drag.active = false;
+    }
+
+    if mouse_buttons.just_pressed(MouseButton::Left) {
+        let thumb_hovered = hover_map
+            .values()
+            .flat_map(|m| m.keys().copied())
+            .any(|e| thumb_query.contains(e));
+        if thumb_hovered {
+            drag.active = true;
+            drag.last_mouse_y = window.cursor_position().map(|p| p.y).unwrap_or(0.);
+        }
+    }
+
+    if !drag.active || !mouse_buttons.pressed(MouseButton::Left) {
+        drag.active = false;
+        return;
+    }
+
+    let Some(cursor_y) = window.cursor_position().map(|p| p.y) else {
+        return;
+    };
+
+    let delta_y = cursor_y - drag.last_mouse_y;
+    drag.last_mouse_y = cursor_y;
+
+    if delta_y == 0. {
+        return;
+    }
+
+    let Ok(track_node) = scrollbar_query.single() else { return; };
+    let Ok((mut scroll_pos, content_node)) = content_query.single_mut() else { return; };
+
+    let viewport_h = content_node.size().y;
+    let content_h = content_node.content_size().y;
+    let track_h = track_node.size().y;
+    let scale = content_node.inverse_scale_factor();
+
+    if content_h <= viewport_h || track_h <= 0. {
+        return;
+    }
+
+    let thumb_h = (viewport_h / content_h * track_h).max(20.0);
+    let thumb_travel = (track_h - thumb_h) * scale;
+    let max_scroll = (content_h - viewport_h) * scale;
+
+    if thumb_travel <= 0. {
+        return;
+    }
+
+    let scroll_delta = delta_y * max_scroll / thumb_travel;
+    scroll_pos.y = (scroll_pos.y + scroll_delta).clamp(0., max_scroll);
 }
 
 fn update_scrollbar(

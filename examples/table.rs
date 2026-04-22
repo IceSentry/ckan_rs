@@ -13,7 +13,14 @@ fn main() {
         .insert_resource(UiTheme(create_dark_theme()))
         .add_systems(Startup, setup)
         .add_systems(Update, send_scroll_events)
-        .add_systems(PostUpdate, on_table_spawned.after(UiSystems::PostLayout))
+        .add_systems(
+            PostUpdate,
+            (
+                on_table_spawned,
+                // update_scrollbar,
+            )
+                .after(UiSystems::PostLayout),
+        )
         .add_observer(on_scroll_handler)
         .run();
 }
@@ -92,17 +99,39 @@ fn thead(content: impl Scene) -> impl Scene {
 
 #[derive(Component, Default, Clone)]
 struct TableBody;
+#[derive(Component, Default, Clone)]
+struct TableBodyContent;
 fn tbody(content: impl SceneList) -> impl Scene {
     bsn! {
         TableBody
         Node {
-            flex_direction: FlexDirection::Column,
-            width: Val::Percent(100.),
-            overflow: Overflow::scroll_y(),
+            flex_direction: FlexDirection::Row,
+            width: percent(100.),
+            height: percent(100.),
         }
         Children[
-            { content }
+            (
+                TableBodyContent
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    width: percent(100),
+                    height: percent(100.),
+                    overflow: Overflow::scroll_y(),
+                }
+                Children[{ content }]
+            ),
+            scrollbar_track()
         ]
+    }
+}
+
+fn scrollbar_track() -> impl Scene {
+    bsn! {
+        Node {
+            width: px(12),
+            height: percent(100),
+        }
+        ThemeBackgroundColor(tokens::SCROLLBAR_BG)
     }
 }
 
@@ -254,6 +283,7 @@ struct Scroll {
     delta: Vec2,
 }
 
+// This only handles scrolling vertically
 fn on_scroll_handler(
     mut scroll: On<Scroll>,
     mut query: Query<(&mut ScrollPosition, &Node, &ComputedNode)>,
@@ -265,20 +295,6 @@ fn on_scroll_handler(
     let max_offset = (computed.content_size() - computed.size()) * computed.inverse_scale_factor();
 
     let delta = &mut scroll.delta;
-    if node.overflow.x == OverflowAxis::Scroll && delta.x != 0. {
-        // Is this node already scrolled all the way in the direction of the scroll?
-        let max = if delta.x > 0. {
-            scroll_position.x >= max_offset.x
-        } else {
-            scroll_position.x <= 0.
-        };
-
-        if !max {
-            scroll_position.x += delta.x;
-            // Consume the X portion of the scroll delta.
-            delta.x = 0.;
-        }
-    }
 
     if node.overflow.y == OverflowAxis::Scroll && delta.y != 0. {
         // Is this node already scrolled all the way in the direction of the scroll?
@@ -296,7 +312,7 @@ fn on_scroll_handler(
     }
 
     // Stop propagating when the delta is fully consumed.
-    if *delta == Vec2::ZERO {
+    if delta.y == 0.0 {
         scroll.propagate(false);
     }
 }

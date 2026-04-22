@@ -2,6 +2,8 @@ use bevy::feathers::dark_theme::create_dark_theme;
 use bevy::feathers::display::label;
 use bevy::feathers::theme::{ThemeBackgroundColor, UiTheme};
 use bevy::feathers::{FeathersPlugins, tokens};
+use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
+use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use bevy::ui::UiSystems;
 
@@ -10,7 +12,9 @@ fn main() {
         .add_plugins((DefaultPlugins, FeathersPlugins))
         .insert_resource(UiTheme(create_dark_theme()))
         .add_systems(Startup, setup)
+        .add_systems(Update, send_scroll_events)
         .add_systems(PostUpdate, on_table_spawned.after(UiSystems::PostLayout))
+        .add_observer(on_scroll_handler)
         .run();
 }
 
@@ -46,9 +50,9 @@ fn ui_root() -> impl Scene {
         table(bsn_list!{
             thead(bsn!{
                 tr(bsn_list!{
-                    td(bsn!{ label("AAA") }),
-                    td(bsn!{ label("BBbbbbbbbbbbbbbbbbbBBBBBBBBB") }),
-                    td(bsn!{ label("CCCCCCCCCCCC") }),
+                    td(bsn!{ label("index") }),
+                    td(bsn!{ label("Header ----------------------------------------------") }),
+                    td(bsn!{ label("header") }),
                 })
             }),
             tbody(bsn_list!{
@@ -94,6 +98,7 @@ fn tbody(content: impl SceneList) -> impl Scene {
         Node {
             flex_direction: FlexDirection::Column,
             width: Val::Percent(100.),
+            overflow: Overflow::scroll_y(),
         }
         Children[
             { content }
@@ -215,5 +220,83 @@ fn on_table_spawned(
                 }
             }
         }
+    }
+}
+
+const SCROLL_SPEED: f32 = 42.;
+
+fn send_scroll_events(
+    mut mouse_wheel_reader: MessageReader<MouseWheel>,
+    hover_map: Res<HoverMap>,
+    mut commands: Commands,
+) {
+    for mouse_wheel in mouse_wheel_reader.read() {
+        let mut delta = -Vec2::new(mouse_wheel.x, mouse_wheel.y);
+
+        if mouse_wheel.unit == MouseScrollUnit::Line {
+            delta *= SCROLL_SPEED;
+        }
+
+        for pointer_map in hover_map.values() {
+            for entity in pointer_map.keys().copied() {
+                commands.trigger(Scroll { entity, delta });
+            }
+        }
+    }
+}
+
+/// UI scrolling event.
+#[derive(EntityEvent, Debug)]
+#[entity_event(propagate, auto_propagate)]
+struct Scroll {
+    entity: Entity,
+    /// Scroll delta in logical coordinates.
+    delta: Vec2,
+}
+
+fn on_scroll_handler(
+    mut scroll: On<Scroll>,
+    mut query: Query<(&mut ScrollPosition, &Node, &ComputedNode)>,
+) {
+    let Ok((mut scroll_position, node, computed)) = query.get_mut(scroll.entity) else {
+        return;
+    };
+
+    let max_offset = (computed.content_size() - computed.size()) * computed.inverse_scale_factor();
+
+    let delta = &mut scroll.delta;
+    if node.overflow.x == OverflowAxis::Scroll && delta.x != 0. {
+        // Is this node already scrolled all the way in the direction of the scroll?
+        let max = if delta.x > 0. {
+            scroll_position.x >= max_offset.x
+        } else {
+            scroll_position.x <= 0.
+        };
+
+        if !max {
+            scroll_position.x += delta.x;
+            // Consume the X portion of the scroll delta.
+            delta.x = 0.;
+        }
+    }
+
+    if node.overflow.y == OverflowAxis::Scroll && delta.y != 0. {
+        // Is this node already scrolled all the way in the direction of the scroll?
+        let max = if delta.y > 0. {
+            scroll_position.y >= max_offset.y
+        } else {
+            scroll_position.y <= 0.
+        };
+
+        if !max {
+            scroll_position.y += delta.y;
+            // Consume the Y portion of the scroll delta.
+            delta.y = 0.;
+        }
+    }
+
+    // Stop propagating when the delta is fully consumed.
+    if *delta == Vec2::ZERO {
+        scroll.propagate(false);
     }
 }

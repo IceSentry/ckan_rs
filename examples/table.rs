@@ -28,9 +28,23 @@ fn setup(mut commands: Commands) {
 
 fn ui_root() -> impl Scene {
     let mut rows = vec![];
+    let mut rows_2 = vec![];
 
-    for i in 0..420 {
+    for i in 0..42 {
         rows.push(bsn! {
+            tr(bsn_list! {
+                td(bsn!{
+                    Node {
+                        justify_content: JustifyContent::Center,
+                        width: percent(100)
+                    }
+                    Children[ label(format!("{i}")) ]
+                }),
+                td(bsn!{ label("test 1") }),
+                td(bsn!{ label("test 2") })
+            })
+        });
+        rows_2.push(bsn! {
             tr(bsn_list! {
                 td(bsn!{
                     Node {
@@ -47,22 +61,48 @@ fn ui_root() -> impl Scene {
 
     bsn! {
         Node {
-            width: percent(80),
-            height: percent(80),
+            width: percent(100),
+            height: percent(100),
         }
         ThemeBackgroundColor(tokens::WINDOW_BG)
-        table(bsn_list!{
-            thead(bsn!{
-                tr(bsn_list!{
-                    td(bsn!{ label("index") }),
-                    td(bsn!{ label("Header ----------------------------------------------") }),
-                    td(bsn!{ label("header") }),
+        Children[
+            (
+                Node {
+                    width: percent(50),
+                    // height: percent(100),
+                }
+                table(bsn_list!{
+                    thead(bsn!{
+                        tr(bsn_list!{
+                            td(bsn!{ label("index") }),
+                            td(bsn!{ label("Header ----------------------------------------------") }),
+                            td(bsn!{ label("header") }),
+                        })
+                    }),
+                    tbody(bsn_list!{
+                        {rows}
+                    })
                 })
-            }),
-            tbody(bsn_list!{
-                {rows}
-            })
-        })
+            ),
+            (
+                Node {
+                    width: percent(50),
+                    // height: percent(100),
+                }
+                table(bsn_list!{
+                    thead(bsn!{
+                        tr(bsn_list!{
+                            td(bsn!{ label("index") }),
+                            td(bsn!{ label("Header ----------------------------------------------") }),
+                            td(bsn!{ label("header") }),
+                        })
+                    }),
+                    tbody(bsn_list!{
+                        {rows_2}
+                    })
+                })
+            )
+        ]
     }
 }
 

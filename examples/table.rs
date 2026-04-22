@@ -28,7 +28,7 @@ fn setup(mut commands: Commands) {
 fn ui_root() -> impl Scene {
     let mut rows = vec![];
 
-    for i in 0..100 {
+    for i in 0..42 {
         rows.push(bsn! {
             tr(bsn_list! {
                 td(bsn!{
@@ -46,8 +46,8 @@ fn ui_root() -> impl Scene {
 
     bsn! {
         Node {
-            width: percent(100),
-            height: percent(100),
+            width: percent(80),
+            height: percent(80),
         }
         ThemeBackgroundColor(tokens::WINDOW_BG)
         table(bsn_list!{
@@ -93,6 +93,17 @@ fn thead(content: impl Scene) -> impl Scene {
     }
 }
 
+fn ui_debug() -> impl Scene {
+    bsn! {UiDebugOptions {
+        enabled: true,
+        outline_border_box: true,
+        outline_padding_box: true,
+        outline_content_box: true,
+        outline_scrollbars: true,
+        line_width: 0.25,
+    }}
+}
+
 #[derive(Component, Default, Clone)]
 struct TableBody;
 #[derive(Component, Default, Clone)]
@@ -100,18 +111,19 @@ struct TableBodyContent;
 fn tbody(content: impl SceneList) -> impl Scene {
     bsn! {
         TableBody
+        ui_debug()
         Node {
             flex_direction: FlexDirection::Row,
-            width: percent(100.),
-            height: percent(100.),
+            overflow: Overflow::scroll_y(),
         }
         Children[
             (
                 TableBodyContent
+                ui_debug()
                 Node {
                     flex_direction: FlexDirection::Column,
                     width: percent(100),
-                    height: percent(100.),
+                    height: percent(100),
                     overflow: Overflow::scroll_y(),
                 }
                 Children[{ content }]

@@ -159,25 +159,6 @@ fn horizontal_serparator() -> impl Scene {
     )
 }
 
-fn find_descendants(
-    entity: Entity,
-    children_q: &Query<&Children>,
-    predicate: &impl Fn(Entity) -> bool,
-) -> Vec<Entity> {
-    let Ok(children) = children_q.get(entity) else {
-        return vec![];
-    };
-    let mut result = vec![];
-    for child in children.iter() {
-        if predicate(child) {
-            result.push(child);
-        } else {
-            result.extend(find_descendants(child, children_q, predicate));
-        }
-    }
-    result
-}
-
 fn on_table_spawned(
     tables: Query<Entity, Added<Table>>,
     children: Query<&Children>,
@@ -189,13 +170,22 @@ fn on_table_spawned(
 ) {
     for table in &tables {
         // collect header TD widths in order
-        let headers = find_descendants(table, &children, &|e| table_headers.get(e).is_ok());
+        let headers: Vec<Entity> = children
+            .iter_descendants(table)
+            .filter(|&e| table_headers.get(e).is_ok())
+            .collect();
 
         let mut header_widths: Vec<f32> = Vec::new();
         for header in headers {
-            let rows = find_descendants(header, &children, &|e| is_row.get(e).is_ok());
+            let rows: Vec<Entity> = children
+                .iter_descendants(header)
+                .filter(|&e| is_row.get(e).is_ok())
+                .collect();
             for row in rows {
-                let tds = find_descendants(row, &children, &|e| td_computed_node.get(e).is_ok());
+                let tds: Vec<Entity> = children
+                    .iter_descendants(row)
+                    .filter(|&e| td_computed_node.get(e).is_ok())
+                    .collect();
                 for td in tds {
                     let width = td_computed_node.get(td).unwrap().size().x;
                     header_widths.push(width);
@@ -204,12 +194,21 @@ fn on_table_spawned(
         }
 
         // apply header widths to each body row's TDs in order
-        let body = find_descendants(table, &children, &|e| is_body.get(e).is_ok());
+        let body: Vec<Entity> = children
+            .iter_descendants(table)
+            .filter(|&e| is_body.get(e).is_ok())
+            .collect();
         assert!(body.len() == 1, "Unexpectedly found multiple table body");
 
-        let rows = find_descendants(body[0], &children, &|e| is_row.get(e).is_ok());
+        let rows: Vec<Entity> = children
+            .iter_descendants(body[0])
+            .filter(|&e| is_row.get(e).is_ok())
+            .collect();
         for row in rows {
-            let tds = find_descendants(row, &children, &|e| td_node.get(e).is_ok());
+            let tds: Vec<Entity> = children
+                .iter_descendants(row)
+                .filter(|&e| td_node.get(e).is_ok())
+                .collect();
             for (col, td) in tds.into_iter().enumerate() {
                 if let Some(&width) = header_widths.get(col) {
                     td_node.get_mut(td).unwrap().width = Val::Px(width);

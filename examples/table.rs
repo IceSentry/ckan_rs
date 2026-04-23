@@ -1,3 +1,4 @@
+use bevy::ecs::relationship::Relationship;
 use bevy::feathers::dark_theme::create_dark_theme;
 use bevy::feathers::display::label;
 use bevy::feathers::theme::{ThemeBackgroundColor, UiTheme};
@@ -324,11 +325,15 @@ fn send_scroll_events(
     mut mouse_wheel_reader: MessageReader<MouseWheel>,
     hover_map: Res<HoverMap>,
     mut commands: Commands,
-    content_query: Query<&ComputedNode, With<TableBodyContent>>,
+    content_query: Query<(Entity, &ComputedNode), With<TableBodyContent>>,
     rows: Query<(), With<TableRow>>,
+    children_query: Query<&Children>,
 ) {
-    let scroll_speed = content_query.single().map_or(1.0, |node| {
-        let row_count = rows.iter().count();
+    let scroll_speed = content_query.iter().next().map_or(1.0, |(entity, node)| {
+        let row_count = children_query
+            .iter_descendants(entity)
+            .filter(|&e| rows.contains(e))
+            .count();
         if row_count > 0 {
             node.content_size().y * node.inverse_scale_factor() / row_count as f32
         } else {
@@ -364,6 +369,7 @@ struct Scroll {
 struct ThumbDrag {
     active: bool,
     last_mouse_y: f32,
+    thumb: Option<Entity>,
 }
 
 fn drag_thumb(
@@ -372,7 +378,9 @@ fn drag_thumb(
     hover_map: Res<HoverMap>,
     windows: Query<&Window>,
     thumb_query: Query<(), With<ScrollbarThumb>>,
-    scrollbar_query: Query<&ComputedNode, With<Scrollbar>>,
+    thumb_parents: Query<&ChildOf, With<ScrollbarThumb>>,
+    scrollbar_query: Query<(&ComputedNode, &ChildOf), With<Scrollbar>>,
+    body_children: Query<&Children>,
     mut content_query: Query<(&mut ScrollPosition, &ComputedNode), With<TableBodyContent>>,
 ) {
     let Ok(window) = windows.single() else {
@@ -381,21 +389,24 @@ fn drag_thumb(
 
     if mouse_buttons.just_released(MouseButton::Left) {
         drag.active = false;
+        drag.thumb = None;
     }
 
     if mouse_buttons.just_pressed(MouseButton::Left) {
-        let thumb_hovered = hover_map
+        let hovered_thumb = hover_map
             .values()
             .flat_map(|m| m.keys().copied())
-            .any(|e| thumb_query.contains(e));
-        if thumb_hovered {
+            .find(|&e| thumb_query.contains(e));
+        if let Some(thumb) = hovered_thumb {
             drag.active = true;
+            drag.thumb = Some(thumb);
             drag.last_mouse_y = window.cursor_position().map(|p| p.y).unwrap_or(0.);
         }
     }
 
     if !drag.active || !mouse_buttons.pressed(MouseButton::Left) {
         drag.active = false;
+        drag.thumb = None;
         return;
     }
 
@@ -410,16 +421,29 @@ fn drag_thumb(
         return;
     }
 
-    let Ok(track_node) = scrollbar_query.single() else {
+    let Some(thumb) = drag.thumb else {
         return;
     };
-    let Ok((mut scroll_pos, content_node)) = content_query.single_mut() else {
+
+    // Navigate: thumb -> Scrollbar -> TableBody -> TableBodyContent
+    let Some((track_h, content_entity)) = (|| -> Option<(f32, Entity)> {
+        let scrollbar_entity = thumb_parents.get(thumb).ok()?.get();
+        let (track_node, scrollbar_parent) = scrollbar_query.get(scrollbar_entity).ok()?;
+        let track_h = track_node.size().y;
+        let content_entity = body_children
+            .iter_descendants(scrollbar_parent.get())
+            .find(|&e| content_query.contains(e))?;
+        Some((track_h, content_entity))
+    })() else {
+        return;
+    };
+
+    let Ok((mut scroll_pos, content_node)) = content_query.get_mut(content_entity) else {
         return;
     };
 
     let viewport_h = content_node.size().y;
     let content_h = content_node.content_size().y;
-    let track_h = track_node.size().y;
     let scale = content_node.inverse_scale_factor();
 
     if content_h <= viewport_h || track_h <= 0. {
@@ -439,38 +463,53 @@ fn drag_thumb(
 }
 
 fn update_scrollbar(
-    body_contents: Query<(&ScrollPosition, &ComputedNode), With<TableBodyContent>>,
-    scrollbar: Query<&ComputedNode, With<Scrollbar>>,
-    mut thumb: Query<&mut Node, With<ScrollbarThumb>>,
+    body_contents: Query<(&ScrollPosition, &ComputedNode, &ChildOf), With<TableBodyContent>>,
+    scrollbar_computed_nodes: Query<&ComputedNode, With<Scrollbar>>,
+    mut thumb_nodes: Query<&mut Node, With<ScrollbarThumb>>,
+    children_query: Query<&Children>,
 ) {
-    let Ok((scroll_pos, content_node)) = body_contents.single() else {
-        return;
-    };
-    let Ok(track_node) = scrollbar.single() else {
-        return;
-    };
-    let Ok(mut thumb_node) = thumb.single_mut() else {
-        return;
-    };
+    for (scroll_pos, content_node, content_parent) in body_contents.iter() {
+        // TODO consider caching this when the table spawns
+        let Some(scrollbar_entity) = children_query
+            .iter_descendants(content_parent.get())
+            .find(|&e| scrollbar_computed_nodes.contains(e))
+        else {
+            continue;
+        };
 
-    let viewport_h = content_node.size().y;
-    let content_h = content_node.content_size().y;
-    let track_h = track_node.size().y;
+        let Some(thumb_entity) = children_query
+            .iter_descendants(scrollbar_entity)
+            .find(|&e| thumb_nodes.contains(e))
+        else {
+            continue;
+        };
 
-    if content_h <= viewport_h || track_h <= 0. {
-        thumb_node.height = Val::Percent(0.);
-        return;
+        let Ok(scrollbar_computed_node) = scrollbar_computed_nodes.get(scrollbar_entity) else {
+            continue;
+        };
+        let Ok(mut thumb_node) = thumb_nodes.get_mut(thumb_entity) else {
+            continue;
+        };
+
+        let viewport_h = content_node.size().y;
+        let content_h = content_node.content_size().y;
+        let track_h = scrollbar_computed_node.size().y;
+
+        if content_h <= viewport_h || track_h <= 0. {
+            thumb_node.height = Val::Percent(0.);
+            continue;
+        }
+
+        let scale = content_node.inverse_scale_factor();
+
+        let thumb_h = (viewport_h / content_h * track_h).max(20.0);
+        let max_scroll = (content_h - viewport_h) * scale;
+        let scroll_ratio = (scroll_pos.y / max_scroll).clamp(0., 1.);
+        let thumb_top = (track_h - thumb_h) * scroll_ratio;
+
+        thumb_node.height = Val::Px(thumb_h * scale);
+        thumb_node.top = Val::Px(thumb_top * scale);
     }
-
-    let scale = content_node.inverse_scale_factor();
-
-    let thumb_h = (viewport_h / content_h * track_h).max(20.0);
-    let max_scroll = (content_h - viewport_h) * scale;
-    let scroll_ratio = (scroll_pos.y / max_scroll).clamp(0., 1.);
-    let thumb_top = (track_h - thumb_h) * scroll_ratio;
-
-    thumb_node.height = Val::Px(thumb_h * scale);
-    thumb_node.top = Val::Px(thumb_top * scale);
 }
 
 // This only handles scrolling vertically

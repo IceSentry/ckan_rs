@@ -12,14 +12,17 @@ fn main() {
     App::new()
         .add_plugins((DefaultPlugins, FeathersPlugins))
         .insert_resource(UiTheme(create_dark_theme()))
-        .init_resource::<ThumbDrag>()
+        .init_resource::<ThumbDragActive>()
         .add_systems(Startup, setup)
-        .add_systems(Update, (send_scroll_events, drag_thumb))
+        .add_systems(Update, send_scroll_events)
         .add_systems(
             PostUpdate,
             (on_table_spawned, update_scrollbar).after(UiSystems::PostLayout),
         )
         .add_observer(on_scroll_handler)
+        .add_observer(on_thumb_drag_start)
+        .add_observer(on_thumb_drag)
+        .add_observer(on_thumb_drag_end)
         .run();
 }
 
@@ -70,7 +73,6 @@ fn ui_root() -> impl Scene {
             (
                 Node {
                     width: percent(50),
-                    // height: percent(100),
                 }
                 table(bsn_list!{
                     thead(bsn!{
@@ -88,7 +90,6 @@ fn ui_root() -> impl Scene {
             (
                 Node {
                     width: percent(50),
-                    // height: percent(100),
                 }
                 table(bsn_list!{
                     thead(bsn!{
@@ -328,7 +329,11 @@ fn send_scroll_events(
     content_query: Query<(Entity, &ComputedNode), With<TableBodyContent>>,
     rows: Query<(), With<TableRow>>,
     children_query: Query<&Children>,
+    thumb_drag_active: Res<ThumbDragActive>,
 ) {
+    if thumb_drag_active.0 {
+        return;
+    }
     let scroll_speed = content_query.iter().next().map_or(1.0, |(entity, node)| {
         let row_count = children_query
             .iter_descendants(entity)
@@ -366,79 +371,61 @@ struct Scroll {
 }
 
 #[derive(Resource, Default)]
-struct ThumbDrag {
-    active: bool,
-    last_mouse_y: f32,
-    thumb: Option<Entity>,
+struct ThumbDragActive(bool);
+
+fn on_thumb_drag_start(
+    event: On<Pointer<DragStart>>,
+    thumb_query: Query<(), With<ScrollbarThumb>>,
+    mut active: ResMut<ThumbDragActive>,
+) {
+    if thumb_query.contains(event.event_target()) {
+        active.0 = true;
+    }
 }
 
-fn drag_thumb(
-    mut drag: ResMut<ThumbDrag>,
-    mouse_buttons: Res<ButtonInput<MouseButton>>,
-    hover_map: Res<HoverMap>,
-    windows: Query<&Window>,
+fn on_thumb_drag_end(
+    event: On<Pointer<DragEnd>>,
+    thumb_query: Query<(), With<ScrollbarThumb>>,
+    mut active: ResMut<ThumbDragActive>,
+) {
+    if thumb_query.contains(event.event_target()) {
+        active.0 = false;
+    }
+}
+
+fn on_thumb_drag(
+    event: On<Pointer<Drag>>,
     thumb_query: Query<(), With<ScrollbarThumb>>,
     thumb_parents: Query<&ChildOf, With<ScrollbarThumb>>,
-    scrollbar_query: Query<(&ComputedNode, &ChildOf), With<Scrollbar>>,
-    body_children: Query<&Children>,
-    mut content_query: Query<(&mut ScrollPosition, &ComputedNode), With<TableBodyContent>>,
+    scrollbar_node: Query<(&ComputedNode, &ChildOf), With<Scrollbar>>,
+    children: Query<&Children>,
+    body_content_node: Query<&ComputedNode, With<TableBodyContent>>,
+    mut commands: Commands,
 ) {
-    let Ok(window) = windows.single() else {
-        return;
-    };
-
-    if mouse_buttons.just_released(MouseButton::Left) {
-        drag.active = false;
-        drag.thumb = None;
-    }
-
-    if mouse_buttons.just_pressed(MouseButton::Left) {
-        let hovered_thumb = hover_map
-            .values()
-            .flat_map(|m| m.keys().copied())
-            .find(|&e| thumb_query.contains(e));
-        if let Some(thumb) = hovered_thumb {
-            drag.active = true;
-            drag.thumb = Some(thumb);
-            drag.last_mouse_y = window.cursor_position().map(|p| p.y).unwrap_or(0.);
-        }
-    }
-
-    if !drag.active || !mouse_buttons.pressed(MouseButton::Left) {
-        drag.active = false;
-        drag.thumb = None;
+    if !thumb_query.contains(event.event_target()) {
         return;
     }
 
-    let Some(cursor_y) = window.cursor_position().map(|p| p.y) else {
-        return;
-    };
-
-    let delta_y = cursor_y - drag.last_mouse_y;
-    drag.last_mouse_y = cursor_y;
-
+    let delta_y = event.delta.y;
     if delta_y == 0. {
         return;
     }
 
-    let Some(thumb) = drag.thumb else {
-        return;
-    };
+    let thumb = event.event_target();
 
-    // Navigate: thumb -> Scrollbar -> TableBody -> TableBodyContent
     let Some((track_h, content_entity)) = (|| -> Option<(f32, Entity)> {
         let scrollbar_entity = thumb_parents.get(thumb).ok()?.get();
-        let (track_node, scrollbar_parent) = scrollbar_query.get(scrollbar_entity).ok()?;
+        let (track_node, scrollbar_parent) = scrollbar_node.get(scrollbar_entity).ok()?;
         let track_h = track_node.size().y;
-        let content_entity = body_children
+        let content_entity = children
             .iter_descendants(scrollbar_parent.get())
-            .find(|&e| content_query.contains(e))?;
+            .find(|&e| body_content_node.contains(e))?;
         Some((track_h, content_entity))
     })() else {
         return;
     };
 
-    let Ok((mut scroll_pos, content_node)) = content_query.get_mut(content_entity) else {
+    let Ok(content_node) = body_content_node.get(content_entity) else {
         return;
     };
 
@@ -452,14 +439,17 @@ fn drag_thumb(
 
     let thumb_h = (viewport_h / content_h * track_h).max(20.0);
     let thumb_travel = (track_h - thumb_h) * scale;
-    let max_scroll = (content_h - viewport_h) * scale;
 
     if thumb_travel <= 0. {
         return;
     }
 
+    let max_scroll = (content_h - viewport_h) * scale;
     let scroll_delta = delta_y * max_scroll / thumb_travel;
-    scroll_pos.y = (scroll_pos.y + scroll_delta).clamp(0., max_scroll);
+    commands.trigger(Scroll {
+        entity: content_entity,
+        delta: Vec2::new(0., scroll_delta),
+    });
 }
 
 fn update_scrollbar(

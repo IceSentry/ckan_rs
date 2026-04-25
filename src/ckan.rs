@@ -1,5 +1,5 @@
 use anyhow::{Context, bail};
-use bevy::platform::collections::HashMap;
+use bevy::{log::info, platform::collections::HashMap};
 use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer};
 use std::path::{Path, PathBuf};
@@ -116,9 +116,12 @@ pub fn get_repo(registry: &Registry) -> anyhow::Result<Repo> {
         .join("CKAN")
         .join("repos");
 
+    info!("repositories found for registry:");
     for name in registry.sorted_repositories.keys() {
+        info!("{name}");
         for entry in std::fs::read_dir(&repos_dir)?.filter_map(|e| e.ok()) {
             let path = entry.path();
+            info!("{path:?}");
             if path
                 .file_name()
                 .and_then(|n| n.to_str())
@@ -140,7 +143,7 @@ pub fn run_command(args: &[&str]) -> anyhow::Result<std::process::Output> {
 }
 
 fn read_json_file<P: AsRef<Path>, T: serde::de::DeserializeOwned>(p: P) -> anyhow::Result<T> {
-    let file = std::fs::File::open(p)?;
-    let reader = std::io::BufReader::new(file);
-    Ok(serde_json::from_reader(reader)?)
+    let bytes = std::fs::read(p)?;
+    let s = String::from_utf8_lossy(&bytes);
+    Ok(serde_json::from_str(&s)?)
 }

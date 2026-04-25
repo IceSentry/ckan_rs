@@ -12,7 +12,7 @@ impl Plugin for DataTablePlugin {
             .add_systems(Update, send_scroll_events)
             .add_systems(
                 PostUpdate,
-                (on_table_spawned, update_scrollbar).after(UiSystems::PostLayout),
+                (sync_column_widths, update_scrollbar).after(UiSystems::PostLayout),
             )
             .add_observer(on_scroll_handler)
             .add_observer(on_thumb_drag_start)
@@ -23,6 +23,7 @@ impl Plugin for DataTablePlugin {
 
 #[derive(Component, Default, Clone)]
 pub struct Table;
+
 pub fn table(content: impl SceneList) -> impl Scene {
     bsn! {
         Table
@@ -174,56 +175,75 @@ pub fn horizontal_serparator() -> impl Scene {
     )
 }
 
-fn on_table_spawned(
-    tables: Query<Entity, Added<Table>>,
-    children: Query<&Children>,
+fn sync_column_widths(
+    changed_tds: Query<Entity, (With<TableData>, Changed<ComputedNode>)>,
+    child_of: Query<&ChildOf>,
     table_headers: Query<(), With<TableHeader>>,
+    tables: Query<(), With<Table>>,
+    children: Query<&Children>,
     is_body: Query<(), With<TableBody>>,
     is_row: Query<(), With<TableRow>>,
     td_computed_node: Query<&ComputedNode, With<TableData>>,
     mut td_node: Query<&mut Node, With<TableData>>,
 ) {
-    for table in &tables {
-        // collect header TD widths in order
-        let headers: Vec<Entity> = children
-            .iter_descendants(table)
-            .filter(|&e| table_headers.get(e).is_ok())
-            .collect();
+    // Walk up from each changed TableData to find which Tables need syncing,
+    // only counting TDs that are under a TableHeader.
+    let mut tables_to_sync = vec![];
+    for td in &changed_tds {
+        let mut current = td;
+        let mut saw_header = false;
+        while let Ok(parent) = child_of.get(current) {
+            current = parent.get();
+            if !saw_header && table_headers.contains(current) {
+                saw_header = true;
+            }
+            if saw_header && tables.contains(current) {
+                if !tables_to_sync.contains(&current) {
+                    tables_to_sync.push(current);
+                }
+                break;
+            }
+        }
+    }
 
-        let mut header_widths: Vec<f32> = Vec::new();
-        for header in headers {
-            let rows: Vec<Entity> = children
+    for table in tables_to_sync {
+        info!("{table:?}");
+        // Collect header TD widths in order.
+        let mut header_widths = vec![];
+        for header in children
+            .iter_descendants(table)
+            .filter(|&e| table_headers.contains(e))
+        {
+            for row in children
                 .iter_descendants(header)
-                .filter(|&e| is_row.get(e).is_ok())
-                .collect();
-            for row in rows {
-                let tds: Vec<Entity> = children
+                .filter(|&e| is_row.contains(e))
+            {
+                for td in children
                     .iter_descendants(row)
-                    .filter(|&e| td_computed_node.get(e).is_ok())
-                    .collect();
-                for td in tds {
-                    let width = td_computed_node.get(td).unwrap().size().x;
-                    header_widths.push(width);
+                    .filter(|&e| td_computed_node.contains(e))
+                {
+                    header_widths.push(td_computed_node.get(td).unwrap().size().x);
                 }
             }
         }
 
-        // apply header widths to each body row's TDs in order
-        let body: Vec<Entity> = children
+        // Apply header widths to each body row's TDs in order.
+        let Some(body) = children
             .iter_descendants(table)
-            .filter(|&e| is_body.get(e).is_ok())
-            .collect();
-        assert!(body.len() == 1, "Unexpectedly found multiple table body");
+            .find(|&e| is_body.contains(e))
+        else {
+            continue;
+        };
 
-        let rows: Vec<Entity> = children
-            .iter_descendants(body[0])
-            .filter(|&e| is_row.get(e).is_ok())
-            .collect();
-        for row in rows {
-            let tds: Vec<Entity> = children
+        let body_rows = children
+            .iter_descendants(body)
+            .filter(|&e| is_row.contains(e))
+            .collect::<Vec<_>>();
+        for row in body_rows {
+            let tds = children
                 .iter_descendants(row)
-                .filter(|&e| td_node.get(e).is_ok())
-                .collect();
+                .filter(|&e| td_node.contains(e))
+                .collect::<Vec<_>>();
             for (col, td) in tds.into_iter().enumerate() {
                 if let Some(&width) = header_widths.get(col) {
                     td_node.get_mut(td).unwrap().width = Val::Px(width);
